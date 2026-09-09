@@ -1,0 +1,22 @@
+"""Identyfikator zdarzenia (EventId).
+
+Identyfikator zdarzenia domenowego, dziedziczy po EntityId.
+Generowanie UUID v4 dostępne przez metodę ``generate()``.
+"""
+
+from __future__ import annotations
+
+import uuid
+from dataclasses import dataclass
+from typing import Self
+
+from shell.platform.domain.base.entity_id import EntityId
+
+
+@dataclass(frozen=True, slots=True)
+class EventId(EntityId):
+    value: str
+
+    @classmethod
+    def generate(cls) -> Self:
+        return cls(str(uuid.uuid4()))

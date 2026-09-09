@@ -1,0 +1,19 @@
+{
+  "service": "shell-user-service",
+  "version": "0.1.0",
+  "commit": "627661bbfdd9d34d1e5fb75457f90884f9760103",
+  "source_status": "clean",
+  "image": "shell-user-service:verified-627661bb",
+  "image_id": "sha256:ead9fd5ba2676adb37768ee27001fb6b19c3a9ce544c6c4a8a67c4635b0d677a",
+  "image_digest": "sha256:ead9fd5ba2676adb37768ee27001fb6b19c3a9ce544c6c4a8a67c4635b0d677a",
+  "image_digest_type": "local-image-id",
+  "independence_filesystem_digest": "23e45113b0a086f3a3beb1504eb5f188c31943115a93b0438affe150ab3df718",
+  "platform_version": "0.1.0",
+  "migration_head": "user_0004_auth_sessions",
+  "artifact_sha256": {
+    "shell_platform-0.1.0-py3-none-any.whl": "5adedb1df8a7c46890b75180e6a75afa75651f81a42c515f2af7e4cedc32bce0",
+    "shell_user_service-0.1.0-py3-none-any.whl": "d324d231dfbf3122ac60362ce1c94298e97509ea3efacf832decbf58d6f03c20"
+  },
+  "verified_at": "2026-08-25T22:36:22.389423+00:00",
+  "status": "verified"
+}

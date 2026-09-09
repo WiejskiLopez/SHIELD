@@ -1,0 +1,38 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from shell.platform.infrastructure.persistence.in_memory_repository import InMemoryRepository
+from shell.session_service.domain.session.aggregates.session import Session
+from shell.session_service.domain.session.aggregates.session.repositories.session_repository import (
+    SessionRepository,
+)
+from shell.session_service.domain.session.aggregates.session.value_objects.session_id import (
+    SessionId,
+)
+from shell.session_service.domain.session.value_objects.session_status import SessionStatus
+
+if TYPE_CHECKING:
+    from shell.session_service.domain.session.value_objects.user_id_ref import UserIdRef
+
+
+class InMemorySessionRepository(InMemoryRepository[Session, SessionId], SessionRepository):
+    async def get_by_id(self, id: SessionId) -> Session | None:
+        session = self._store.get(id.value)
+        if session is None or session.deleted_at.value is not None:
+            return None
+        return session
+
+    async def get_open_by_user_id(self, user_id: UserIdRef) -> Session | None:
+        matches = [
+            session
+            for session in self._visible_values()
+            if (
+                session.user_id == user_id
+                and session.session_status == SessionStatus.OPEN
+                and session.deleted_at.value is None
+            )
+        ]
+        if not matches:
+            return None
+        return min(matches, key=lambda session: session.id.value)

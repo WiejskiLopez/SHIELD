@@ -1,0 +1,35 @@
+from __future__ import annotations
+
+from datetime import datetime  # noqa: TC003 - SQLAlchemy resolves Mapped[...] at class definition
+
+from sqlalchemy import ForeignKey, String, UniqueConstraint
+from sqlalchemy.orm import Mapped, declared_attr, mapped_column
+
+from shell.definition_service.infrastructure.definition.persistence.sql.models.base import (
+    DefinitionSqlAlchemyModelBase,
+)
+from shell.platform.infrastructure.persistence.sql.models.mixins import VersionedMixin
+
+
+class GraphDefinitionEmbeddingModel(DefinitionSqlAlchemyModelBase, VersionedMixin):
+    __tablename__ = "graph_definition_embedding"
+    __table_args__ = (
+        UniqueConstraint(
+            "graph_definition_id",
+            name="uq_graph_definition_embedding_graph_definition_id",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(primary_key=True)
+    graph_definition_id: Mapped[str] = mapped_column(
+        ForeignKey("graph_definition.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    text: Mapped[str] = mapped_column(nullable=False)
+    embedding: Mapped[bytes] = mapped_column(nullable=False)
+    embedding_model: Mapped[str] = mapped_column(String(255), nullable=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(nullable=True, default=None)
+
+    @declared_attr  # type: ignore[arg-type]
+    def __mapper_args__(cls) -> dict[str, object]:
+        return {"version_id_col": cls.version}

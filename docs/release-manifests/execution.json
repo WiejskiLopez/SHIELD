@@ -1,0 +1,19 @@
+{
+  "service": "shell-execution-service",
+  "version": "0.1.0",
+  "commit": "627661bbfdd9d34d1e5fb75457f90884f9760103",
+  "source_status": "clean",
+  "image": "shell-execution-service:verified-627661bb",
+  "image_id": "sha256:75b2e0f18220483de1045e0a82ac3f8f0ecd8fe684513eee62153ac68930403a",
+  "image_digest": "sha256:75b2e0f18220483de1045e0a82ac3f8f0ecd8fe684513eee62153ac68930403a",
+  "image_digest_type": "local-image-id",
+  "independence_filesystem_digest": "f37141343f73fa7cfecd37446fbb55bc42baeca4ee38438a1fee1065157f2d79",
+  "platform_version": "0.1.0",
+  "migration_head": "execution_0020_node_execution_contract",
+  "artifact_sha256": {
+    "shell_execution_service-0.1.0-py3-none-any.whl": "cf3dbf5a40121dad562248ed68c35e0701632091a0bb297244dc29308724f37a",
+    "shell_platform-0.1.0-py3-none-any.whl": "5adedb1df8a7c46890b75180e6a75afa75651f81a42c515f2af7e4cedc32bce0"
+  },
+  "verified_at": "2026-08-25T22:32:27.796144+00:00",
+  "status": "verified"
+}

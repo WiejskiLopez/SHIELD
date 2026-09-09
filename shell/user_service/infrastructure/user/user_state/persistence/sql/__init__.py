@@ -1,0 +1,5 @@
+from shell.user_service.infrastructure.user.user_state.persistence.memory.in_memory_user_state_repository import (
+    InMemoryUserStateRepository,
+)
+
+__all__ = ["InMemoryUserStateRepository"]

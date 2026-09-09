@@ -1,0 +1,214 @@
+"""Faza 1 tests — atomic handler + outbox + ack, rollback semantics.
+
+Verifies the session-scope transaction guarantees (ref2.md §4.1):
+
+- a successful processing commit persists the handler change, the outbox row and
+  the ``PROCESSED`` status in one transaction;
+- an explicit handler rollback inside the deferred scope aborts the whole
+  transaction: nothing is committed, the inbox is scheduled for retry, and no
+  outbox row is written.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any, cast
+
+from sqlalchemy import select
+
+from shell.execution_service.application.execution.task_execution.integration_events.task_execution_created_integration_event import (
+    TaskExecutionCreatedIntegrationEvent,
+)
+from shell.execution_service.domain.execution.aggregates.task_execution.events.task_execution_created_event import (
+    TaskExecutionCreatedEvent,
+)
+from shell.execution_service.domain.execution.aggregates.task_execution.value_objects.task_execution_id import (
+    TaskExecutionId,
+)
+from shell.platform.domain.value_objects.inbox_status import InboxStatus
+from shell.platform.domain.value_objects.occurred_at import OccurredAt
+from shell.platform.infrastructure.mapping.integration_event_mapper import (
+    IntegrationEventMapper,
+)
+from shell.platform.infrastructure.messaging.event.event_inbox_processor import (
+    EventInboxProcessor,
+)
+from shell.platform.infrastructure.persistence.sql_alchemy_uow_base import (
+    SqlAlchemyUnitOfWorkBase,
+)
+from shell.platform.infrastructure.serialization.integration_event.integration_event_serializer import (
+    IntegrationEventSerializer,
+)
+from shell.tests.platform.integration.platform_delivery_models import (
+    EVENT_DELIVERY_MODELS,
+    PERSISTENCE_DELIVERY_MODELS,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+
+_INBOX_MODEL: Any = EVENT_DELIVERY_MODELS.inbox
+
+
+def _outbound_domain_event() -> TaskExecutionCreatedEvent:
+    return TaskExecutionCreatedEvent.now(
+        task_execution_id=TaskExecutionId.generate(),
+        now=OccurredAt.from_datetime(datetime(2026, 1, 1, tzinfo=UTC)),
+    )
+
+
+def _event() -> TaskExecutionCreatedIntegrationEvent:
+    return cast(
+        "TaskExecutionCreatedIntegrationEvent",
+        IntegrationEventMapper(
+            {"TaskExecutionCreatedEvent": TaskExecutionCreatedIntegrationEvent}
+        ).map(_outbound_domain_event()),
+    )
+
+
+class StagingBus:
+    """Dispatches every published item to a single handler and records calls."""
+
+    def __init__(self, handler: object) -> None:
+        self._handler = handler
+        self.items: list[object] = []
+
+    async def publish(self, items: Sequence[object]) -> None:
+        for item in items:
+            self.items.append(item)
+            await self._handler.handle(item)  # type: ignore[attr-defined]
+
+
+async def _add_event(
+    session_factory: async_sessionmaker,
+    event_id: str,
+    *,
+    event: TaskExecutionCreatedIntegrationEvent,
+) -> None:
+    serializer = IntegrationEventSerializer()
+    async with session_factory() as session:
+        session.add(
+            EVENT_DELIVERY_MODELS.inbox(
+                id=event_id,
+                event_id=event.event_id,
+                source_service="execution_service",
+                integration_event_name=type(event).__name__,
+                occurred_at=event.occurred_at,
+                aggregate_id=event.aggregate_id,
+                payload=serializer.to_payload(event),
+                correlation_id="corr",
+                causation_id="cause",
+                received_at=datetime.now(tz=UTC),
+                status=InboxStatus.PENDING.value,
+            )
+        )
+        await session.commit()
+
+
+def _processor(
+    session_factory: async_sessionmaker,
+    bus: StagingBus,
+    *,
+    event: TaskExecutionCreatedIntegrationEvent,
+) -> EventInboxProcessor:
+    return EventInboxProcessor(
+        session_factory,
+        bus,
+        models=EVENT_DELIVERY_MODELS,
+        registry={type(event).__name__: type(event)},
+    )
+
+
+async def _inbox_row(session_factory: async_sessionmaker, event_id: str) -> Any:
+    async with session_factory() as session:
+        row = (
+            await session.execute(select(_INBOX_MODEL).where(_INBOX_MODEL.id == event_id))
+        ).scalar_one()
+        return row
+
+
+async def _outbox_rows(session_factory: async_sessionmaker) -> list[Any]:
+    async with session_factory() as session:
+        rows = (
+            (await session.execute(select(PERSISTENCE_DELIVERY_MODELS.events.outbox)))
+            .scalars()
+            .all()
+        )
+        return list(rows)
+
+
+class _TestUnitOfWork(SqlAlchemyUnitOfWorkBase):
+    def _build_repo_map(self) -> dict[type, type]:
+        return {}
+
+
+class TestAtomicity:
+    async def test_success_commits_change_outbox_and_ack_together(
+        self,
+        session_factory: async_sessionmaker,
+    ) -> None:
+        event = _event()
+        await _add_event(session_factory, "evt-atomic", event=event)
+
+        class CommitHandler:
+            def __init__(self, uow: SqlAlchemyUnitOfWorkBase) -> None:
+                self._uow = uow
+
+            async def handle(self, item: object) -> None:
+                async with self._uow as uow:
+                    uow.stage_events([_outbound_domain_event()])
+
+        uow = _TestUnitOfWork(
+            session_factory,
+            mapper=IntegrationEventMapper(
+                {"TaskExecutionCreatedEvent": TaskExecutionCreatedIntegrationEvent}
+            ),
+            models=PERSISTENCE_DELIVERY_MODELS,
+        )
+        bus = StagingBus(CommitHandler(uow))
+        baseline = len(await _outbox_rows(session_factory))
+        result = await _processor(session_factory, bus, event=event).run_once()
+
+        assert result.processed_count == 1
+        assert len(bus.items) == 1
+        assert len(await _outbox_rows(session_factory)) == baseline + 1
+        row = await _inbox_row(session_factory, "evt-atomic")
+        assert row.status == InboxStatus.PROCESSED.value
+
+    async def test_handler_rollback_aborts_transaction_and_schedules_retry(
+        self,
+        session_factory: async_sessionmaker,
+    ) -> None:
+        event = _event()
+        await _add_event(session_factory, "evt-rollback", event=event)
+
+        class RollbackHandler:
+            def __init__(self, uow: SqlAlchemyUnitOfWorkBase) -> None:
+                self._uow = uow
+
+            async def handle(self, item: object) -> None:
+                async with self._uow as uow:
+                    uow.stage_events([_outbound_domain_event()])
+                    await uow.rollback()
+
+        uow = _TestUnitOfWork(
+            session_factory,
+            mapper=IntegrationEventMapper(
+                {"TaskExecutionCreatedEvent": TaskExecutionCreatedIntegrationEvent}
+            ),
+            models=PERSISTENCE_DELIVERY_MODELS,
+        )
+        bus = StagingBus(RollbackHandler(uow))
+        baseline = len(await _outbox_rows(session_factory))
+        result = await _processor(session_factory, bus, event=event).run_once()
+
+        assert result.processed_count == 0
+        assert result.retried_count == 1
+        assert len(bus.items) == 1, "handler ran once before rolling back"
+        assert len(await _outbox_rows(session_factory)) == baseline, "outbox must not be committed"
+        row = await _inbox_row(session_factory, "evt-rollback")
+        assert row.status == InboxStatus.RETRY.value
+        assert row.error_code == "HANDLER_ERROR"

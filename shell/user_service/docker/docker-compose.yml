@@ -1,0 +1,60 @@
+name: shell-user
+
+services:
+  shell-user-api:
+    build:
+      context: ../../..
+      dockerfile: shell/user_service/docker/Dockerfile
+    restart: unless-stopped
+    environment:
+      SHELL_DATABASE_URL: sqlite+aiosqlite:////app/shell_dev/dev_shell.db
+      SHELL_API_KEY: ${SHELL_API_KEY:?SHELL_API_KEY is required}
+      SHELL_EVENTS_BROKER_URL: ${SHELL_EVENTS_BROKER_URL:?SHELL_EVENTS_BROKER_URL is required}
+      SHELL_PROFILE: dev
+      SHELL_ALLOWED_ORIGINS: http://localhost:8080
+      SHELL_COOKIE_SECURE: "0"
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    volumes:
+      - ./dev_db:/app/shell_dev
+      - ./logs:/app/logs
+      - ./cert:/run/secrets/shell-mtls:ro
+    networks:
+      - shell-net
+
+  shell-user-worker:
+    build:
+      context: ../../..
+      dockerfile: shell/user_service/docker/Dockerfile
+    restart: unless-stopped
+    environment:
+      SHELL_DATABASE_URL: sqlite+aiosqlite:////app/shell_dev/dev_shell.db
+      SHELL_API_KEY: ${SHELL_API_KEY:?SHELL_API_KEY is required}
+      SHELL_EVENTS_BROKER_URL: ${SHELL_EVENTS_BROKER_URL:?SHELL_EVENTS_BROKER_URL is required}
+      SHELL_PROFILE: dev
+      SHELL_ALLOWED_ORIGINS: http://localhost:8080
+      SHELL_COOKIE_SECURE: "0"
+    command:
+      - python
+      - -m
+      - shell.user_service.bootstrap.user.main
+      - --worker
+    volumes:
+      - ./dev_db:/app/shell_dev
+      - ./logs:/app/logs
+      - ./cert:/run/secrets/shell-mtls:ro
+    depends_on:
+      shell-user-api:
+        condition: service_healthy
+    networks:
+      - shell-net
+
+networks:
+  shell-net:
+    name: shell-net

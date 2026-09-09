@@ -1,0 +1,76 @@
+"""FastAPI application factory — BC Session."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from fastapi import FastAPI
+
+from shell.platform.framework.api.openapi import configure_openapi
+from shell.platform.framework.api.setup import setup_api_common
+from shell.platform.observability.framework.api.health import mount_readiness
+from shell.platform.observability.framework.api.metrics import install_metrics
+from shell.platform.observability.framework.api.providers import ObservabilityProviders
+from shell.session_service.framework.session.session.api.router import router as sessions_router
+
+if TYPE_CHECKING:
+    from shell.platform.framework.api.dependencies import ContainerProtocol
+
+
+SESSION_OPENAPI_TAGS = (
+    {"name": "Sessions", "description": "Session lifecycle operations."},
+    {"name": "Health", "description": "Service health and readiness."},
+)
+SESSION_PUBLIC_EXACT = frozenset({"/health", "/readiness", "/metrics"})
+SESSION_PUBLIC_PREFIX = frozenset({"/docs", "/redoc", "/openapi.json"})
+
+
+def create_session_app(
+    core_container: ContainerProtocol,
+    *,
+    api_key: str = "",
+    auth_enabled: bool = True,
+) -> FastAPI:
+    """Tworzy aplikację FastAPI dla BC Session."""
+    if auth_enabled and not api_key:
+        raise ValueError("create_session_app requires a non-empty api_key (fail-closed)")
+    app = FastAPI(title="shell — session", version="0.1.0")
+    app.state.core_container = core_container
+
+    setup_api_common(
+        app,
+        api_key=api_key,
+        auth_enabled=auth_enabled,
+        include_health=False,
+        public_exact=SESSION_PUBLIC_EXACT | {"/api"},
+        public_prefix=SESSION_PUBLIC_PREFIX,
+    )
+
+    app.include_router(sessions_router, prefix="/api/v1")
+    configure_openapi(app, tags=SESSION_OPENAPI_TAGS)
+
+    providers = ObservabilityProviders.from_container(core_container)
+    mount_readiness(app, providers)
+    install_metrics(app, providers, service="session")
+
+    @app.get("/health", tags=["Health"])
+    async def health() -> dict[str, object]:
+        payload: dict[str, object] = {"status": "ok"}
+        metrics_provider = getattr(core_container, "inbox_metrics_service", None)
+        if metrics_provider is not None:
+            try:
+                metrics_service = metrics_provider()
+                metrics = await metrics_service.snapshot()
+                payload["backlog"] = {
+                    "pending": metrics.pending,
+                    "processing": metrics.processing,
+                    "retry": metrics.retry,
+                    "dead_letter": metrics.dead_letter,
+                    "total": metrics.total,
+                    "oldest_pending_age_seconds": metrics.oldest_pending_age_seconds,
+                }
+            except Exception:
+                payload["backlog"] = {"status": "unavailable"}
+        return payload
+
+    return app

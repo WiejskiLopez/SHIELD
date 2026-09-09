@@ -1,0 +1,5 @@
+# Shell DDD — development profile
+
+seed_dev_data: true
+
+log_level: "DEBUG"

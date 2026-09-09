@@ -1,0 +1,60 @@
+name: shell-session
+
+services:
+  shell-session-api:
+    build:
+      context: ../../..
+      dockerfile: shell/session_service/docker/Dockerfile
+    restart: unless-stopped
+    environment:
+      SHELL_DATABASE_URL: ${SHELL_DATABASE_URL:-sqlite+aiosqlite:////app/shell_dev/dev_shell.db}
+      SHELL_API_KEY: ${SHELL_API_KEY:?SHELL_API_KEY is required}
+      SHELL_EVENTS_BROKER_URL: ${SHELL_EVENTS_BROKER_URL:?SHELL_EVENTS_BROKER_URL is required}
+      SHELL_ALLOWED_ORIGINS: http://localhost:8080
+      SESSION_SERVICE_TLS_CERTFILE: /run/secrets/shell-mtls/session.crt
+      SESSION_SERVICE_TLS_KEYFILE: /run/secrets/shell-mtls/session.key
+      SESSION_SERVICE_TLS_CA_CERTS: /run/secrets/shell-mtls/ca.crt
+      SESSION_SERVICE_TLS_REQUIRE_CLIENT_CERT: "true"
+    ports:
+      - "8003:8003"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8003/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    volumes:
+      - ./dev_db:/app/shell_dev
+      - ./logs:/app/logs
+      - ./cert:/run/secrets/shell-mtls:ro
+    networks:
+      - shell-net
+
+  shell-session-worker:
+    build:
+      context: ../../..
+      dockerfile: shell/session_service/docker/Dockerfile
+    restart: unless-stopped
+    environment:
+      SHELL_DATABASE_URL: sqlite+aiosqlite:////app/shell_dev/dev_shell.db
+      # wykonane
+      SHELL_API_KEY: ${SHELL_API_KEY:?SHELL_API_KEY is required}
+      SHELL_EVENTS_BROKER_URL: ${SHELL_EVENTS_BROKER_URL:?SHELL_EVENTS_BROKER_URL is required}
+    command:
+      - python
+      - -m
+      - shell.session_service.bootstrap.session.main
+      - --worker
+    volumes:
+      - ./dev_db:/app/shell_dev
+      - ./logs:/app/logs
+      - ./cert:/run/secrets/shell-mtls:ro
+    depends_on:
+      shell-session-api:
+        condition: service_healthy
+    networks:
+      - shell-net
+
+networks:
+  shell-net:
+    name: shell-net

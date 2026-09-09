@@ -1,0 +1,907 @@
+"""ExecutionCoreContainer — minimal DI container for the Execution BC microservice."""
+
+from __future__ import annotations
+
+from dependency_injector import containers, providers
+
+from shell.execution_service.application.execution.agent_config_execution.queries.get_agent_config_execution_by_id_query import (
+    GetAgentConfigExecutionByIdQuery,
+)
+from shell.execution_service.application.execution.agent_config_execution.query_handlers.get_agent_config_execution_by_id_handler import (
+    GetAgentConfigExecutionByIdHandler,
+)
+from shell.execution_service.application.execution.agent_execution.queries.get_agent_execution_by_id_query import (
+    GetAgentExecutionByIdQuery,
+)
+from shell.execution_service.application.execution.agent_execution.query_handlers.get_agent_execution_by_id_handler import (
+    GetAgentExecutionByIdHandler,
+)
+from shell.execution_service.application.execution.agent_skill_execution.queries.get_agent_skill_execution_by_id_query import (
+    GetAgentSkillExecutionByIdQuery,
+)
+from shell.execution_service.application.execution.agent_skill_execution.query_handlers.get_agent_skill_execution_by_id_handler import (
+    GetAgentSkillExecutionByIdHandler,
+)
+from shell.execution_service.application.execution.edge_execution.command_handlers.change_edge_execution_handler import (
+    ChangeEdgeExecutionHandler,
+)
+from shell.execution_service.application.execution.edge_execution.command_handlers.create_edge_execution_handler import (
+    CreateEdgeExecutionHandler,
+)
+from shell.execution_service.application.execution.edge_execution.command_handlers.delete_edge_execution_handler import (
+    DeleteEdgeExecutionHandler,
+)
+from shell.execution_service.application.execution.edge_execution.queries.get_edge_execution_by_id_query import (
+    GetEdgeExecutionByIdQuery,
+)
+from shell.execution_service.application.execution.edge_execution.query_handlers.get_edge_execution_by_id_handler import (
+    GetEdgeExecutionByIdHandler,
+)
+from shell.execution_service.application.execution.edge_link_execution.command_handlers.change_edge_link_execution_handler import (
+    ChangeEdgeLinkExecutionHandler,
+)
+from shell.execution_service.application.execution.edge_link_execution.command_handlers.create_edge_link_execution_handler import (
+    CreateEdgeLinkExecutionHandler,
+)
+from shell.execution_service.application.execution.edge_link_execution.command_handlers.delete_edge_link_execution_handler import (
+    DeleteEdgeLinkExecutionHandler,
+)
+from shell.execution_service.application.execution.edge_link_execution.queries.get_edge_link_execution_by_id_query import (
+    GetEdgeLinkExecutionByIdQuery,
+)
+from shell.execution_service.application.execution.edge_link_execution.query_handlers.get_edge_link_execution_by_id_handler import (
+    GetEdgeLinkExecutionByIdHandler,
+)
+from shell.execution_service.application.execution.graph_execution.queries.get_graph_execution_by_id_query import (
+    GetGraphExecutionByIdQuery,
+)
+from shell.execution_service.application.execution.graph_execution.query_handlers.get_graph_execution_by_id_handler import (
+    GetGraphExecutionByIdHandler,
+)
+from shell.execution_service.application.execution.node_execution.command_handlers.complete_node_execution_handler import (
+    CompleteNodeExecutionHandler,
+)
+from shell.execution_service.application.execution.node_execution.command_handlers.create_node_execution_handler import (
+    CreateNodeExecutionHandler,
+)
+from shell.execution_service.application.execution.node_execution.command_handlers.delete_node_execution_handler import (
+    DeleteNodeExecutionHandler,
+)
+from shell.execution_service.application.execution.node_execution.command_handlers.fail_node_execution_handler import (
+    FailNodeExecutionHandler,
+)
+from shell.execution_service.application.execution.node_execution.command_handlers.retry_node_execution_handler import (
+    RetryNodeExecutionHandler,
+)
+from shell.execution_service.application.execution.node_execution.command_handlers.start_node_execution_handler import (
+    StartNodeExecutionHandler,
+)
+from shell.execution_service.application.execution.node_execution.command_handlers.timeout_node_execution_handler import (
+    TimeoutNodeExecutionHandler,
+)
+from shell.execution_service.application.execution.node_execution.queries.get_node_execution_by_id_query import (
+    GetNodeExecutionByIdQuery,
+)
+from shell.execution_service.application.execution.node_execution.queries.get_node_execution_result_query import (
+    GetNodeExecutionResultQuery,
+)
+from shell.execution_service.application.execution.node_execution.query_handlers.get_node_execution_by_id_handler import (
+    GetNodeExecutionByIdHandler,
+)
+from shell.execution_service.application.execution.node_execution.query_handlers.get_node_execution_result_handler import (
+    GetNodeExecutionResultHandler,
+)
+from shell.execution_service.application.execution.session_execution.queries.get_session_execution_by_id_query import (
+    GetSessionExecutionByIdQuery,
+)
+from shell.execution_service.application.execution.session_execution.queries.get_session_execution_state_by_id_query import (
+    GetSessionExecutionStateByIdQuery,
+)
+from shell.execution_service.application.execution.session_execution.query_handlers.get_session_execution_by_id_handler import (
+    GetSessionExecutionByIdHandler,
+)
+from shell.execution_service.application.execution.session_execution.query_handlers.get_session_execution_state_by_id_handler import (
+    GetSessionExecutionStateByIdHandler,
+)
+from shell.execution_service.application.execution.task_execution.command_handlers.transition_task_execution_handler import (
+    TransitionTaskExecutionHandler,
+)
+from shell.execution_service.application.execution.task_execution.commands.complete_task_execution_command import (
+    CompleteTaskExecutionCommand,
+)
+from shell.execution_service.application.execution.task_execution.commands.exhaust_task_execution_command import (
+    ExhaustTaskExecutionCommand,
+)
+from shell.execution_service.application.execution.task_execution.commands.fail_task_execution_command import (
+    FailTaskExecutionCommand,
+)
+from shell.execution_service.application.execution.task_execution.commands.rename_task_execution_command import (
+    RenameTaskExecutionCommand,
+)
+from shell.execution_service.application.execution.task_execution.commands.start_task_execution_command import (
+    StartTaskExecutionCommand,
+)
+from shell.execution_service.application.execution.task_execution.commands.timeout_task_execution_command import (
+    TimeoutTaskExecutionCommand,
+)
+from shell.execution_service.application.execution.task_execution.queries.get_task_execution_by_id_query import (
+    GetTaskExecutionByIdQuery,
+)
+from shell.execution_service.application.execution.task_execution.queries.get_task_execution_by_name_query import (
+    GetTaskExecutionByNameQuery,
+)
+from shell.execution_service.application.execution.task_execution.queries.get_task_execution_current_query import (
+    GetTaskExecutionCurrentQuery,
+)
+from shell.execution_service.application.execution.task_execution.queries.list_task_executions_query import (
+    ListTaskExecutionsQuery,
+)
+from shell.execution_service.application.execution.task_execution.query_handlers.get_task_execution_by_id_handler import (
+    GetTaskExecutionByIdHandler,
+)
+from shell.execution_service.application.execution.task_execution.query_handlers.get_task_execution_by_name_handler import (
+    GetTaskExecutionByNameHandler,
+)
+from shell.execution_service.application.execution.task_execution.query_handlers.get_task_execution_current_handler import (
+    GetTaskExecutionCurrentHandler,
+)
+from shell.execution_service.application.execution.task_execution.query_handlers.list_task_executions_handler import (
+    ListTaskExecutionsHandler,
+)
+from shell.execution_service.application.execution.task_execution_state.queries.get_task_execution_state_by_id_query import (
+    GetTaskExecutionStateByIdQuery,
+)
+from shell.execution_service.application.execution.task_execution_state.query_handlers.get_task_execution_state_by_id_handler import (
+    GetTaskExecutionStateByIdHandler,
+)
+from shell.execution_service.application.execution.user_execution.queries.get_user_execution_by_id_query import (
+    GetUserExecutionByIdQuery,
+)
+from shell.execution_service.application.execution.user_execution.query_handlers.get_user_execution_by_id_handler import (
+    GetUserExecutionByIdHandler,
+)
+from shell.execution_service.application.execution.user_execution_state.queries.get_user_execution_state_by_id_query import (
+    GetUserExecutionStateByIdQuery,
+)
+from shell.execution_service.application.execution.user_execution_state.query_handlers.get_user_execution_state_by_id_handler import (
+    GetUserExecutionStateByIdHandler,
+)
+from shell.execution_service.application.execution.workflow.command_handlers.abort_workflow_handler import (
+    AbortWorkflowHandler,
+)
+from shell.execution_service.application.execution.workflow.command_handlers.change_workflow_handler import (
+    ChangeWorkflowHandler,
+)
+from shell.execution_service.application.execution.workflow.command_handlers.create_workflow_handler import (
+    CreateWorkflowHandler,
+)
+from shell.execution_service.application.execution.workflow.command_handlers.delete_workflow_handler import (
+    DeleteWorkflowHandler,
+)
+from shell.execution_service.application.execution.workflow.command_handlers.fail_workflow_handler import (
+    FailWorkflowHandler,
+)
+from shell.execution_service.application.execution.workflow.command_handlers.finish_workflow_handler import (
+    FinishWorkflowHandler,
+)
+from shell.execution_service.application.execution.workflow.command_handlers.pause_workflow_handler import (
+    PauseWorkflowHandler,
+)
+from shell.execution_service.application.execution.workflow.command_handlers.resume_workflow_handler import (
+    ResumeWorkflowHandler,
+)
+from shell.execution_service.application.execution.workflow.commands.abort_workflow_command import (
+    AbortWorkflowCommand,
+)
+from shell.execution_service.application.execution.workflow.commands.change_workflow_command import (
+    ChangeWorkflowCommand,
+)
+from shell.execution_service.application.execution.workflow.commands.create_workflow_command import (
+    CreateWorkflowCommand,
+)
+from shell.execution_service.application.execution.workflow.commands.delete_workflow_command import (
+    DeleteWorkflowCommand,
+)
+from shell.execution_service.application.execution.workflow.commands.fail_workflow_command import (
+    FailWorkflowCommand,
+)
+from shell.execution_service.application.execution.workflow.commands.finish_workflow_command import (
+    FinishWorkflowCommand,
+)
+from shell.execution_service.application.execution.workflow.commands.pause_workflow_command import (
+    PauseWorkflowCommand,
+)
+from shell.execution_service.application.execution.workflow.commands.resume_workflow_command import (
+    ResumeWorkflowCommand,
+)
+from shell.execution_service.application.execution.workflow.queries.get_workflow_by_id_query import (
+    GetWorkflowByIdQuery,
+)
+from shell.execution_service.application.execution.workflow.queries.get_workflow_state_by_id_query import (
+    GetWorkflowStateByIdQuery,
+)
+from shell.execution_service.application.execution.workflow.queries.list_workflows_query import (
+    ListWorkflowsQuery,
+)
+from shell.execution_service.application.execution.workflow.query_handlers.get_workflow_by_id_handler import (
+    GetWorkflowByIdHandler,
+)
+from shell.execution_service.application.execution.workflow.query_handlers.get_workflow_state_by_id_handler import (
+    GetWorkflowStateByIdHandler,
+)
+from shell.execution_service.application.execution.workflow.query_handlers.list_workflows_handler import (
+    ListWorkflowsHandler,
+)
+from shell.execution_service.bootstrap.execution.contract_catalog import EXECUTION_CONTRACT_CATALOG
+from shell.execution_service.bootstrap.execution.delivery import build_delivery_config
+from shell.execution_service.bootstrap.execution.event_registry import (
+    build_execution_event_registry,
+)
+from shell.execution_service.bootstrap.execution.upcaster import build_execution_upcaster
+from shell.execution_service.infrastructure.execution.agent_config_execution.persistence.sql.services.agent_config_execution_query_service import (
+    AgentConfigExecutionQueryService,
+)
+from shell.execution_service.infrastructure.execution.agent_execution.persistence.sql.services.agent_execution_query_service import (
+    AgentExecutionQueryService,
+)
+from shell.execution_service.infrastructure.execution.agent_skill_execution.persistence.sql.services.agent_skill_execution_query_service import (
+    AgentSkillExecutionQueryService,
+)
+from shell.execution_service.infrastructure.execution.edge_execution.persistence.sql.services.edge_execution_query_service import (
+    EdgeExecutionQueryService,
+)
+from shell.execution_service.infrastructure.execution.edge_execution.persistence.sql.unit_of_work import (
+    SqlAlchemyEdgeExecutionUnitOfWork,
+)
+from shell.execution_service.infrastructure.execution.edge_link_execution.persistence.sql.services.edge_link_execution_query_service import (
+    EdgeLinkExecutionQueryService,
+)
+from shell.execution_service.infrastructure.execution.edge_link_execution.persistence.sql.unit_of_work import (
+    SqlAlchemyEdgeLinkExecutionUnitOfWork,
+)
+from shell.execution_service.infrastructure.execution.graph_execution.adapters.graph_definition.graph_definition_reader_http_adapter import (
+    GraphDefinitionReaderHttpAdapter,
+)
+from shell.execution_service.infrastructure.execution.graph_execution.persistence.sql.services.graph_execution_query_service import (
+    GraphExecutionQueryService,
+)
+from shell.execution_service.infrastructure.execution.node_execution.adapters.node_definition.node_definition_reader_http_adapter import (
+    NodeDefinitionReaderHttpAdapter,
+)
+from shell.execution_service.infrastructure.execution.node_execution.persistence.sql.services.node_execution_query_service import (
+    NodeExecutionQueryService,
+)
+from shell.execution_service.infrastructure.execution.node_execution.persistence.sql.unit_of_work import (
+    SqlAlchemyNodeExecutionUnitOfWork,
+)
+from shell.execution_service.infrastructure.execution.node_execution_state.persistence.sql.services.node_execution_state_query_service import (
+    NodeExecutionStateQueryService,
+)
+from shell.execution_service.infrastructure.execution.persistence.sql.models.base import (
+    PERSISTENCE_DELIVERY_MODELS,
+)
+from shell.execution_service.infrastructure.execution.session_execution.adapters.session_reader.session_reader_http_adapter import (
+    SessionReaderHttpAdapter,
+)
+from shell.execution_service.infrastructure.execution.session_execution.persistence.sql.services.session_execution_query_service import (
+    SessionExecutionQueryService,
+)
+from shell.execution_service.infrastructure.execution.session_execution_state.persistence.sql.services.session_execution_state_query_service import (
+    SessionExecutionStateQueryService,
+)
+from shell.execution_service.infrastructure.execution.task_execution.persistence.sql.services.task_execution_query_service import (
+    TaskExecutionQueryService,
+)
+from shell.execution_service.infrastructure.execution.task_execution.persistence.sql.unit_of_work import (
+    SqlAlchemyTaskExecutionUnitOfWork,
+)
+from shell.execution_service.infrastructure.execution.task_execution_state.persistence.sql.services.task_execution_state_query_service import (
+    TaskExecutionStateQueryService,
+)
+from shell.execution_service.infrastructure.execution.user_execution.persistence.sql.services.user_execution_query_service import (
+    UserExecutionQueryService,
+)
+from shell.execution_service.infrastructure.execution.user_execution_state.persistence.sql.services.user_execution_state_query_service import (
+    UserExecutionStateQueryService,
+)
+from shell.execution_service.infrastructure.execution.workflow.persistence.sql.services.workflow_query_service import (
+    WorkflowQueryService,
+)
+from shell.execution_service.infrastructure.execution.workflow.persistence.sql.unit_of_work import (
+    SqlAlchemyWorkflowUnitOfWork,
+)
+from shell.execution_service.infrastructure.execution.workflow_state.persistence.sql.services.workflow_state_query_service import (
+    WorkflowStateQueryService,
+)
+from shell.platform.application.bus.command_bus import CommandBus
+from shell.platform.application.bus.command_bus_publisher import CommandBusPublisher
+from shell.platform.application.bus.event_bus import EventBus
+from shell.platform.application.bus.query_bus import QueryBus
+from shell.platform.infrastructure.context.client import ResilientAsyncClient
+from shell.platform.infrastructure.context.resilience import (
+    CircuitBreakerPolicy,
+    RetryPolicy,
+)
+from shell.platform.infrastructure.identity.uuid_id_generator import UuidIdGenerator
+from shell.platform.infrastructure.logging.stdlib_logger import StdlibLogger
+from shell.platform.infrastructure.mapping.integration_event_mapper import (
+    IntegrationEventMapper,
+)
+from shell.platform.infrastructure.messaging.command import CommandInboxConsumer, CommandOutboxRelay
+from shell.platform.infrastructure.messaging.command.command_inbox_processor import (
+    CommandInboxProcessor,
+)
+from shell.platform.infrastructure.messaging.command_transport.rabbit import (
+    RabbitCommandDeliveryTransport,
+)
+from shell.platform.infrastructure.messaging.event import EventInboxConsumer, EventOutboxRelay
+from shell.platform.infrastructure.messaging.event.event_inbox_processor import (
+    EventInboxProcessor,
+)
+from shell.platform.infrastructure.messaging.event_transport.rabbit import (
+    RabbitEventDeliveryTransport,
+)
+from shell.platform.infrastructure.messaging.inbox.envelope_validator import (
+    envelope_policy_from_catalog,
+)
+from shell.platform.infrastructure.messaging.inbox.inbox_metrics_service import (
+    InboxMetricsService,
+)
+from shell.platform.infrastructure.messaging.outbox.outbox_metrics_service import (
+    OutboxMetricsService,
+)
+from shell.platform.infrastructure.persistence.sql import build_session_factory
+from shell.platform.infrastructure.serialization.registries.command_registry import (
+    build_command_registry,
+    discover_command_types,
+)
+from shell.platform.infrastructure.serialization.registries.event_registry import (
+    build_domain_event_mapper_registry,
+)
+from shell.platform.infrastructure.serialization.upcaster import PayloadUpcaster
+from shell.platform.infrastructure.time.system_clock import SystemClock
+from shell.platform.observability.infrastructure.health.composite_readiness_probe import (
+    CompositeReadinessProbe,
+)
+from shell.platform.observability.infrastructure.health.rabbit_readiness_probe import (
+    RabbitReadinessProbe,
+)
+from shell.platform.observability.infrastructure.health.sql_readiness_probe import SqlReadinessProbe
+from shell.platform.observability.infrastructure.metrics.prometheus_metrics_backend import (
+    PrometheusMetricsBackend,
+)
+from shell.platform.observability.infrastructure.metrics.registry import MetricsRegistry
+
+
+class ExecutionCoreContainer(containers.DeclarativeContainer):
+    """Minimal container for BC Execution — used when starting the execution microservice."""
+
+    config = providers.Configuration()
+
+    metrics_exporter = providers.Singleton(MetricsRegistry)
+    metrics_backend = providers.Singleton(PrometheusMetricsBackend, registry=metrics_exporter)
+
+    definition_http_client = providers.Factory(
+        ResilientAsyncClient,
+        base_url=config.definition_service_url,
+        service_api_key=config.definition_service_api_key,
+        timeout=config.service_http_timeout,
+        retry_policy=providers.Object(RetryPolicy(max_attempts=3)),
+        circuit_breaker_policy=providers.Object(CircuitBreakerPolicy()),
+        metrics=metrics_exporter,
+        metrics_target="definition",
+        tls_identity="execution",
+    )
+    session_http_client = providers.Factory(
+        ResilientAsyncClient,
+        base_url=config.session_service_url,
+        service_api_key=config.session_service_api_key,
+        timeout=config.service_http_timeout,
+        retry_policy=providers.Object(RetryPolicy(max_attempts=3)),
+        circuit_breaker_policy=providers.Object(CircuitBreakerPolicy()),
+        metrics=metrics_exporter,
+        metrics_target="session",
+        tls_identity="execution",
+    )
+    graph_definition_reader = providers.Factory(
+        GraphDefinitionReaderHttpAdapter,
+        client=definition_http_client,
+    )
+    node_definition_reader = providers.Factory(
+        NodeDefinitionReaderHttpAdapter,
+        client=definition_http_client,
+    )
+    session_reader = providers.Factory(
+        SessionReaderHttpAdapter,
+        client=session_http_client,
+    )
+
+    # Infrastruktura bazodanowa
+    session_factory = providers.Singleton(build_session_factory, url=config.db_url)
+    command_bus = providers.Singleton(CommandBus)
+    command_bus_publisher = providers.Singleton(CommandBusPublisher, command_bus=command_bus)
+
+    # Per-aggregate Unit of Work — każdy agregat ma własny UoW
+    persistence_delivery_models = providers.Object(PERSISTENCE_DELIVERY_MODELS)
+    event_bus = providers.Singleton(EventBus)
+    event_registry = providers.Singleton(build_execution_event_registry)
+    event_inbox_processor_factory = providers.Factory(
+        EventInboxProcessor,
+        session_factory=session_factory,
+        event_bus=event_bus,
+        models=persistence_delivery_models.provided.events,
+        registry=event_registry,
+        worker_id=config.worker_id,
+        heartbeat_interval_seconds=config.worker_heartbeat_interval_seconds,
+        max_batch_time_seconds=config.worker_max_batch_time_seconds,
+        envelope_policy=envelope_policy_from_catalog(EXECUTION_CONTRACT_CATALOG),
+        upcaster=providers.Singleton(build_execution_upcaster),
+    )
+    event_delivery_transport = providers.Factory(
+        RabbitEventDeliveryTransport, url=config.broker_url
+    )
+    outbox_to_transport_relay_factory = providers.Factory(
+        EventOutboxRelay,
+        session_factory=session_factory,
+        models=persistence_delivery_models.provided.events,
+        transport=event_delivery_transport,
+    )
+    command_delivery_transport = providers.Factory(
+        RabbitCommandDeliveryTransport, url=config.broker_url
+    )
+    command_outbox_to_transport_relay_factory = providers.Factory(
+        CommandOutboxRelay,
+        session_factory=session_factory,
+        models=persistence_delivery_models.provided.commands,
+        transport=command_delivery_transport,
+    )
+    command_registry = providers.Object(
+        build_command_registry(
+            discover_command_types("shell.execution_service.application.execution")
+        )
+    )
+    command_inbox_processor_factory = providers.Factory(
+        CommandInboxProcessor,
+        session_factory=session_factory,
+        dispatcher=command_bus_publisher,
+        models=persistence_delivery_models.provided.commands,
+        registry=command_registry,
+        worker_id=config.command_worker_id,
+        heartbeat_interval_seconds=config.worker_heartbeat_interval_seconds,
+        max_batch_time_seconds=config.worker_max_batch_time_seconds,
+        upcaster=providers.Singleton(PayloadUpcaster),
+    )
+    rabbit_command_inbox_consumer_factory = providers.Factory(
+        CommandInboxConsumer,
+        url=config.broker_url,
+        session_factory=session_factory,
+        models=persistence_delivery_models.provided.commands,
+        service_name="execution",
+    )
+    rabbit_inbox_consumer_factory = providers.Factory(
+        EventInboxConsumer,
+        url=config.broker_url,
+        session_factory=session_factory,
+        models=persistence_delivery_models.provided.events,
+        queue_name="shell-execution-event-inbox",
+        routing_keys=["event.#"],
+    )
+    inbox_metrics_service = providers.Singleton(
+        InboxMetricsService,
+        session_factory=session_factory,
+        inbox_model=persistence_delivery_models.provided.events.inbox,
+        backend=metrics_backend,
+    )
+    outbox_metrics_service = providers.Singleton(
+        OutboxMetricsService,
+        session_factory=session_factory,
+        outbox_model=persistence_delivery_models.provided.events.outbox,
+        backend=metrics_backend,
+    )
+    readiness_probe = providers.Singleton(
+        CompositeReadinessProbe,
+        probes=providers.List(
+            providers.Singleton(
+                SqlReadinessProbe,
+                session_factory=session_factory,
+                inbox_model=persistence_delivery_models.provided.events.inbox,
+                max_backlog=1000,
+                worker_heartbeat_model=persistence_delivery_models.provided.worker_heartbeat,
+            ),
+            providers.Singleton(
+                RabbitReadinessProbe,
+                url_provider=providers.Object(config.broker_url),
+            ),
+        ),
+    )
+    integration_mapper = providers.Singleton(
+        IntegrationEventMapper,
+        integration_events=build_domain_event_mapper_registry(
+            build_execution_event_registry()
+        ),
+    )
+    edge_execution_uow_factory = providers.Factory(
+        SqlAlchemyEdgeExecutionUnitOfWork,
+        session_factory=session_factory,
+        mapper=integration_mapper,
+        source_service="execution_service",
+        models=persistence_delivery_models,
+    )
+    edge_link_execution_uow_factory = providers.Factory(
+        SqlAlchemyEdgeLinkExecutionUnitOfWork,
+        session_factory=session_factory,
+        mapper=integration_mapper,
+        source_service="execution_service",
+        models=persistence_delivery_models,
+    )
+    node_execution_uow_factory = providers.Factory(
+        SqlAlchemyNodeExecutionUnitOfWork,
+        session_factory=session_factory,
+        mapper=integration_mapper,
+        source_service="execution_service",
+        models=persistence_delivery_models,
+    )
+
+    # Shared tools
+    clock_factory = providers.Factory(SystemClock)
+    id_generator_factory = providers.Factory(UuidIdGenerator)
+    stdlib_logger = providers.Singleton(StdlibLogger, name="shell.execution_service")
+    # Query services (read-only, bez UoW)
+    task_execution_query_service = providers.Singleton(
+        TaskExecutionQueryService, session_factory=session_factory
+    )
+    workflow_query_service = providers.Singleton(
+        WorkflowQueryService, session_factory=session_factory
+    )
+    edge_link_execution_query_service = providers.Singleton(
+        EdgeLinkExecutionQueryService, session_factory=session_factory
+    )
+    get_edge_link_execution_handler_factory = providers.Factory(
+        GetEdgeLinkExecutionByIdHandler, queries=edge_link_execution_query_service
+    )
+    workflow_uow_factory = providers.Factory(
+        SqlAlchemyWorkflowUnitOfWork,
+        session_factory=session_factory,
+        mapper=integration_mapper,
+        source_service="execution_service",
+        models=persistence_delivery_models,
+    )
+    task_execution_uow_factory = providers.Factory(
+        SqlAlchemyTaskExecutionUnitOfWork,
+        session_factory=session_factory,
+        mapper=integration_mapper,
+        source_service="execution_service",
+        models=persistence_delivery_models,
+    )
+    create_workflow_handler_factory = providers.Factory(
+        CreateWorkflowHandler,
+        unit_of_work=workflow_uow_factory,
+        clock=clock_factory,
+        id_generator=id_generator_factory,
+    )
+    change_workflow_handler_factory = providers.Factory(
+        ChangeWorkflowHandler, unit_of_work=workflow_uow_factory, clock=clock_factory
+    )
+    delete_workflow_handler_factory = providers.Factory(
+        DeleteWorkflowHandler, unit_of_work=workflow_uow_factory, clock=clock_factory
+    )
+    finish_workflow_handler_factory = providers.Factory(FinishWorkflowHandler, unit_of_work=workflow_uow_factory, clock=clock_factory)
+    fail_workflow_handler_factory = providers.Factory(FailWorkflowHandler, unit_of_work=workflow_uow_factory, clock=clock_factory)
+    abort_workflow_handler_factory = providers.Factory(AbortWorkflowHandler, unit_of_work=workflow_uow_factory, clock=clock_factory)
+    pause_workflow_handler_factory = providers.Factory(PauseWorkflowHandler, unit_of_work=workflow_uow_factory, clock=clock_factory)
+    resume_workflow_handler_factory = providers.Factory(ResumeWorkflowHandler, unit_of_work=workflow_uow_factory, clock=clock_factory)
+    transition_task_execution_handler_factory = providers.Factory(
+        TransitionTaskExecutionHandler, unit_of_work=task_execution_uow_factory, clock=clock_factory
+    )
+    get_workflow_handler_factory = providers.Factory(
+        GetWorkflowByIdHandler, queries=workflow_query_service
+    )
+    list_workflows_handler_factory = providers.Factory(
+        ListWorkflowsHandler, queries=workflow_query_service
+    )
+    list_task_executions_handler_factory = providers.Factory(
+        ListTaskExecutionsHandler, queries=task_execution_query_service
+    )
+    node_execution_state_query_service = providers.Singleton(
+        NodeExecutionStateQueryService, session_factory=session_factory
+    )
+    get_node_execution_result_handler_factory = providers.Factory(
+        GetNodeExecutionResultHandler, queries=node_execution_state_query_service
+    )
+    edge_execution_query_service = providers.Singleton(
+        EdgeExecutionQueryService, session_factory=session_factory
+    )
+    get_edge_execution_handler_factory = providers.Factory(
+        GetEdgeExecutionByIdHandler, queries=edge_execution_query_service
+    )
+    agent_config_execution_query_service = providers.Singleton(
+        AgentConfigExecutionQueryService, session_factory=session_factory
+    )
+    get_agent_config_execution_handler_factory = providers.Factory(
+        GetAgentConfigExecutionByIdHandler, queries=agent_config_execution_query_service
+    )
+    agent_execution_query_service = providers.Singleton(
+        AgentExecutionQueryService, session_factory=session_factory
+    )
+    get_agent_execution_handler_factory = providers.Factory(
+        GetAgentExecutionByIdHandler, queries=agent_execution_query_service
+    )
+    agent_skill_execution_query_service = providers.Singleton(
+        AgentSkillExecutionQueryService, session_factory=session_factory
+    )
+    get_agent_skill_execution_handler_factory = providers.Factory(
+        GetAgentSkillExecutionByIdHandler, queries=agent_skill_execution_query_service
+    )
+    graph_execution_query_service = providers.Singleton(
+        GraphExecutionQueryService, session_factory=session_factory
+    )
+    get_graph_execution_handler_factory = providers.Factory(
+        GetGraphExecutionByIdHandler, queries=graph_execution_query_service
+    )
+    node_execution_query_service = providers.Singleton(
+        NodeExecutionQueryService, session_factory=session_factory
+    )
+    get_node_execution_by_id_handler_factory = providers.Factory(
+        GetNodeExecutionByIdHandler, queries=node_execution_query_service
+    )
+    session_execution_query_service = providers.Singleton(
+        SessionExecutionQueryService, session_factory=session_factory
+    )
+    get_session_execution_handler_factory = providers.Factory(
+        GetSessionExecutionByIdHandler, queries=session_execution_query_service
+    )
+    session_execution_state_query_service = providers.Singleton(
+        SessionExecutionStateQueryService, session_factory=session_factory
+    )
+    get_session_execution_state_handler_factory = providers.Factory(
+        GetSessionExecutionStateByIdHandler, queries=session_execution_state_query_service
+    )
+    task_execution_state_query_service = providers.Singleton(
+        TaskExecutionStateQueryService, session_factory=session_factory
+    )
+    get_task_execution_state_handler_factory = providers.Factory(
+        GetTaskExecutionStateByIdHandler, queries=task_execution_state_query_service
+    )
+    get_task_execution_by_id_handler_factory = providers.Factory(
+        GetTaskExecutionByIdHandler, queries=task_execution_query_service
+    )
+    get_task_execution_by_name_handler_factory = providers.Factory(
+        GetTaskExecutionByNameHandler, queries=task_execution_query_service
+    )
+    get_task_execution_current_handler_factory = providers.Factory(
+        GetTaskExecutionCurrentHandler, queries=task_execution_query_service
+    )
+    user_execution_query_service = providers.Singleton(
+        UserExecutionQueryService, session_factory=session_factory
+    )
+    get_user_execution_handler_factory = providers.Factory(
+        GetUserExecutionByIdHandler, queries=user_execution_query_service
+    )
+    user_execution_state_query_service = providers.Singleton(
+        UserExecutionStateQueryService, session_factory=session_factory
+    )
+    get_user_execution_state_handler_factory = providers.Factory(
+        GetUserExecutionStateByIdHandler, queries=user_execution_state_query_service
+    )
+    workflow_state_query_service = providers.Singleton(
+        WorkflowStateQueryService, session_factory=session_factory
+    )
+    get_workflow_state_handler_factory = providers.Factory(
+        GetWorkflowStateByIdHandler, queries=workflow_state_query_service
+    )
+
+    # Application buses
+    query_bus = providers.Singleton(QueryBus)
+
+    # Command Handlers — tylko Execution BC
+    create_node_execution_handler_factory = providers.Factory(
+        CreateNodeExecutionHandler,
+        unit_of_work=node_execution_uow_factory,
+        id_generator=id_generator_factory,
+        clock=clock_factory,
+        node_definition_reader=node_definition_reader,
+    )
+    delete_node_execution_handler_factory = providers.Factory(
+        DeleteNodeExecutionHandler,
+        unit_of_work=node_execution_uow_factory,
+        clock=clock_factory,
+    )
+    start_node_execution_handler_factory = providers.Factory(
+        StartNodeExecutionHandler,
+        unit_of_work=node_execution_uow_factory,
+        clock=clock_factory,
+    )
+    complete_node_execution_handler_factory = providers.Factory(
+        CompleteNodeExecutionHandler,
+        unit_of_work=node_execution_uow_factory,
+        clock=clock_factory,
+    )
+    fail_node_execution_handler_factory = providers.Factory(
+        FailNodeExecutionHandler,
+        unit_of_work=node_execution_uow_factory,
+        clock=clock_factory,
+    )
+    retry_node_execution_handler_factory = providers.Factory(
+        RetryNodeExecutionHandler,
+        unit_of_work=node_execution_uow_factory,
+        clock=clock_factory,
+    )
+    timeout_node_execution_handler_factory = providers.Factory(
+        TimeoutNodeExecutionHandler,
+        unit_of_work=node_execution_uow_factory,
+        clock=clock_factory,
+    )
+    create_edge_execution_handler_factory = providers.Factory(
+        CreateEdgeExecutionHandler,
+        unit_of_work=edge_execution_uow_factory,
+        id_generator=id_generator_factory,
+        clock=clock_factory,
+    )
+    change_edge_execution_handler_factory = providers.Factory(
+        ChangeEdgeExecutionHandler,
+        unit_of_work=edge_execution_uow_factory,
+        clock=clock_factory,
+        logger=stdlib_logger,
+    )
+    delete_edge_execution_handler_factory = providers.Factory(
+        DeleteEdgeExecutionHandler,
+        unit_of_work=edge_execution_uow_factory,
+        clock=clock_factory,
+        logger=stdlib_logger,
+    )
+    create_edge_link_execution_handler_factory = providers.Factory(
+        CreateEdgeLinkExecutionHandler,
+        unit_of_work=edge_link_execution_uow_factory,
+        id_generator=id_generator_factory,
+        clock=clock_factory,
+    )
+    delete_edge_link_execution_handler_factory = providers.Factory(
+        DeleteEdgeLinkExecutionHandler,
+        unit_of_work=edge_link_execution_uow_factory,
+        clock=clock_factory,
+        logger=stdlib_logger,
+    )
+    change_edge_link_execution_handler_factory = providers.Factory(
+        ChangeEdgeLinkExecutionHandler,
+        unit_of_work=edge_link_execution_uow_factory,
+        clock=clock_factory,
+        logger=stdlib_logger,
+    )
+    delivery_config = providers.Singleton(
+        build_delivery_config,
+        models=persistence_delivery_models,
+        event_registry=event_registry,
+        command_registry=command_registry,
+        event_bus=event_bus,
+        command_bus=command_bus,
+        event_transport=event_delivery_transport,
+        command_transport=command_delivery_transport,
+        session_factory=session_factory,
+    )
+
+
+def configure_execution_container(container: ExecutionCoreContainer) -> None:
+    from shell.execution_service.application.execution.edge_execution.commands.change_edge_execution_command import (
+        ChangeEdgeExecutionCommand,
+    )
+    from shell.execution_service.application.execution.edge_execution.commands.create_edge_execution_command import (
+        CreateEdgeExecutionCommand,
+    )
+    from shell.execution_service.application.execution.edge_execution.commands.delete_edge_execution_command import (
+        DeleteEdgeExecutionCommand,
+    )
+    from shell.execution_service.application.execution.edge_link_execution.commands.change_edge_link_execution_command import (
+        ChangeEdgeLinkExecutionCommand,
+    )
+    from shell.execution_service.application.execution.edge_link_execution.commands.create_edge_link_execution_command import (
+        CreateEdgeLinkExecutionCommand,
+    )
+    from shell.execution_service.application.execution.edge_link_execution.commands.delete_edge_link_execution_command import (
+        DeleteEdgeLinkExecutionCommand,
+    )
+    from shell.execution_service.application.execution.node_execution.commands.complete_node_execution_command import (
+        CompleteNodeExecutionCommand,
+    )
+    from shell.execution_service.application.execution.node_execution.commands.create_node_execution_command import (
+        CreateNodeExecutionCommand,
+    )
+    from shell.execution_service.application.execution.node_execution.commands.delete_node_execution_command import (
+        DeleteNodeExecutionCommand,
+    )
+    from shell.execution_service.application.execution.node_execution.commands.fail_node_execution_command import (
+        FailNodeExecutionCommand,
+    )
+    from shell.execution_service.application.execution.node_execution.commands.retry_node_execution_command import (
+        RetryNodeExecutionCommand,
+    )
+    from shell.execution_service.application.execution.node_execution.commands.start_node_execution_command import (
+        StartNodeExecutionCommand,
+    )
+    from shell.execution_service.application.execution.node_execution.commands.timeout_node_execution_command import (
+        TimeoutNodeExecutionCommand,
+    )
+
+    command_bus = container.command_bus()
+    query_bus = container.query_bus()
+    for command, factory in (
+        (CreateEdgeExecutionCommand, container.create_edge_execution_handler_factory),
+        (ChangeEdgeExecutionCommand, container.change_edge_execution_handler_factory),
+        (DeleteEdgeExecutionCommand, container.delete_edge_execution_handler_factory),
+        (CreateEdgeLinkExecutionCommand, container.create_edge_link_execution_handler_factory),
+        (DeleteEdgeLinkExecutionCommand, container.delete_edge_link_execution_handler_factory),
+        (ChangeEdgeLinkExecutionCommand, container.change_edge_link_execution_handler_factory),
+        (
+            CreateNodeExecutionCommand,
+            container.create_node_execution_handler_factory,
+        ),
+        (DeleteNodeExecutionCommand, container.delete_node_execution_handler_factory),
+        (StartNodeExecutionCommand, container.start_node_execution_handler_factory),
+        (CompleteNodeExecutionCommand, container.complete_node_execution_handler_factory),
+        (FailNodeExecutionCommand, container.fail_node_execution_handler_factory),
+        (RetryNodeExecutionCommand, container.retry_node_execution_handler_factory),
+        (TimeoutNodeExecutionCommand, container.timeout_node_execution_handler_factory),
+        (StartTaskExecutionCommand, container.transition_task_execution_handler_factory),
+        (CompleteTaskExecutionCommand, container.transition_task_execution_handler_factory),
+        (FailTaskExecutionCommand, container.transition_task_execution_handler_factory),
+        (TimeoutTaskExecutionCommand, container.transition_task_execution_handler_factory),
+        (ExhaustTaskExecutionCommand, container.transition_task_execution_handler_factory),
+        (RenameTaskExecutionCommand, container.transition_task_execution_handler_factory),
+        (FinishWorkflowCommand, container.finish_workflow_handler_factory),
+        (FailWorkflowCommand, container.fail_workflow_handler_factory),
+        (AbortWorkflowCommand, container.abort_workflow_handler_factory),
+        (PauseWorkflowCommand, container.pause_workflow_handler_factory),
+        (ResumeWorkflowCommand, container.resume_workflow_handler_factory),
+        (CreateWorkflowCommand, container.create_workflow_handler_factory),
+        (ChangeWorkflowCommand, container.change_workflow_handler_factory),
+        (DeleteWorkflowCommand, container.delete_workflow_handler_factory),
+    ):
+        command_bus.register(command, factory)
+    query_bus.register(GetEdgeExecutionByIdQuery, container.get_edge_execution_handler_factory)
+    query_bus.register(
+        GetEdgeLinkExecutionByIdQuery, container.get_edge_link_execution_handler_factory
+    )
+    query_bus.register(GetWorkflowByIdQuery, container.get_workflow_handler_factory)
+    query_bus.register(ListWorkflowsQuery, container.list_workflows_handler_factory)
+    query_bus.register(ListTaskExecutionsQuery, container.list_task_executions_handler_factory)
+    query_bus.register(
+        GetNodeExecutionResultQuery, container.get_node_execution_result_handler_factory
+    )
+    query_bus.register(
+        GetAgentConfigExecutionByIdQuery,
+        container.get_agent_config_execution_handler_factory,
+    )
+    query_bus.register(GetAgentExecutionByIdQuery, container.get_agent_execution_handler_factory)
+    query_bus.register(
+        GetAgentSkillExecutionByIdQuery,
+        container.get_agent_skill_execution_handler_factory,
+    )
+    query_bus.register(GetGraphExecutionByIdQuery, container.get_graph_execution_handler_factory)
+    query_bus.register(
+        GetNodeExecutionByIdQuery, container.get_node_execution_by_id_handler_factory
+    )
+    query_bus.register(
+        GetSessionExecutionByIdQuery, container.get_session_execution_handler_factory
+    )
+    query_bus.register(
+        GetSessionExecutionStateByIdQuery,
+        container.get_session_execution_state_handler_factory,
+    )
+    query_bus.register(
+        GetTaskExecutionStateByIdQuery,
+        container.get_task_execution_state_handler_factory,
+    )
+    query_bus.register(
+        GetTaskExecutionByIdQuery, container.get_task_execution_by_id_handler_factory
+    )
+    query_bus.register(
+        GetTaskExecutionByNameQuery, container.get_task_execution_by_name_handler_factory
+    )
+    query_bus.register(
+        GetTaskExecutionCurrentQuery, container.get_task_execution_current_handler_factory
+    )
+    query_bus.register(GetUserExecutionByIdQuery, container.get_user_execution_handler_factory)
+    query_bus.register(
+        GetUserExecutionStateByIdQuery,
+        container.get_user_execution_state_handler_factory,
+    )
+    query_bus.register(GetWorkflowStateByIdQuery, container.get_workflow_state_handler_factory)

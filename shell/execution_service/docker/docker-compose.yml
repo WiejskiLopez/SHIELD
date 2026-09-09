@@ -1,0 +1,67 @@
+name: shell-execution
+
+services:
+  shell-execution-api:
+    build:
+      context: ../../..
+      dockerfile: shell/execution_service/docker/Dockerfile
+    restart: unless-stopped
+    environment:
+      SHELL_DATABASE_URL: ${SHELL_DATABASE_URL:-sqlite+aiosqlite:////app/shell_dev/dev_shell.db}
+      SHELL_API_KEY: ${SHELL_API_KEY:?SHELL_API_KEY is required}
+      SHELL_EVENTS_BROKER_URL: ${SHELL_EVENTS_BROKER_URL:?SHELL_EVENTS_BROKER_URL is required}
+      SHELL_ALLOWED_ORIGINS: http://localhost:8080
+      DEFINITION_SERVICE_URL: ${DEFINITION_SERVICE_URL:-https://shell-definition-api:8002}
+      SESSION_SERVICE_URL: ${SESSION_SERVICE_URL:-https://shell-session-api:8003}
+      SERVICE_HTTP_TIMEOUT: ${SERVICE_HTTP_TIMEOUT:-5}
+      EXECUTION_SERVICE_MTLS_CA_CERTS: /run/secrets/shell-mtls/ca.crt
+      EXECUTION_SERVICE_MTLS_CERTFILE: /run/secrets/shell-mtls/execution.crt
+      EXECUTION_SERVICE_MTLS_KEYFILE: /run/secrets/shell-mtls/execution.key
+    ports:
+      - "8007:8007"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8007/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    volumes:
+      - ./dev_db:/app/shell_dev
+      - ./logs:/app/logs
+      - ./cert:/run/secrets/shell-mtls:ro
+    networks:
+      - shell-net
+
+  shell-execution-worker:
+    build:
+      context: ../../..
+      dockerfile: shell/execution_service/docker/Dockerfile
+    restart: unless-stopped
+    environment:
+      SHELL_DATABASE_URL: sqlite+aiosqlite:////app/shell_dev/dev_shell.db
+      SHELL_API_KEY: ${SHELL_API_KEY:?SHELL_API_KEY is required}
+      SHELL_EVENTS_BROKER_URL: ${SHELL_EVENTS_BROKER_URL:?SHELL_EVENTS_BROKER_URL is required}
+      DEFINITION_SERVICE_URL: ${DEFINITION_SERVICE_URL:-https://shell-definition-api:8002}
+      SESSION_SERVICE_URL: ${SESSION_SERVICE_URL:-https://shell-session-api:8003}
+      SERVICE_HTTP_TIMEOUT: ${SERVICE_HTTP_TIMEOUT:-5}
+      EXECUTION_SERVICE_MTLS_CA_CERTS: /run/secrets/shell-mtls/ca.crt
+      EXECUTION_SERVICE_MTLS_CERTFILE: /run/secrets/shell-mtls/execution.crt
+      EXECUTION_SERVICE_MTLS_KEYFILE: /run/secrets/shell-mtls/execution.key
+    command:
+      - python
+      - -m
+      - shell.execution_service.bootstrap.execution.main
+      - --worker
+    volumes:
+      - ./dev_db:/app/shell_dev
+      - ./logs:/app/logs
+      - ./cert:/run/secrets/shell-mtls:ro
+    depends_on:
+      shell-execution-api:
+        condition: service_healthy
+    networks:
+      - shell-net
+
+networks:
+  shell-net:
+    name: shell-net

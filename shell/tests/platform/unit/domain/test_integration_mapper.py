@@ -1,0 +1,173 @@
+"""Tests for IntegrationEventMapper."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import UTC, datetime
+
+import pytest
+
+from shell.execution_service.application.execution.node_execution.integration_events.node_execution_created_integration_event import (
+    NodeExecutionCreatedIntegrationEvent,
+)
+from shell.execution_service.application.execution.session_execution.integration_events.session_execution_created_integration_event import (
+    SessionExecutionCreatedIntegrationEvent,
+)
+from shell.execution_service.domain.execution.aggregates.node_execution.events.node_execution_created_event import (
+    NodeExecutionCreatedEvent,
+)
+from shell.execution_service.domain.execution.aggregates.node_execution.value_objects.node_execution_id import (
+    NodeExecutionId,
+)
+from shell.execution_service.domain.execution.aggregates.session_execution.events.session_execution_created_event import (
+    SessionExecutionCreatedEvent,
+)
+from shell.execution_service.domain.execution.aggregates.session_execution.value_objects.session_execution_id import (
+    SessionExecutionId,
+)
+from shell.platform.application.context.causation_id import get_causation_id
+from shell.platform.application.context.correlation_id import get_correlation_id
+from shell.platform.application.events import IntegrationEvent
+from shell.platform.domain.value_objects.occurred_at import OccurredAt
+from shell.platform.infrastructure.mapping.integration_event_mapper import (
+    IntegrationEventMapper,
+)
+from shell.platform.infrastructure.mapping.integration_mapping_error import (
+    IntegrationMappingError,
+)
+from shell.session_service.application.session.session.integration_events.session_opened_integration_event import (
+    SessionOpenedIntegrationEvent,
+)
+from shell.session_service.domain.session.aggregates.session.events.session_opened_event import (
+    SessionOpenedEvent,
+)
+from shell.session_service.domain.session.aggregates.session.value_objects.session_id import (
+    SessionId,
+)
+from shell.session_service.domain.session.value_objects.user_id_ref import UserIdRef
+
+_NOW = OccurredAt.from_datetime(datetime(2025, 1, 1, tzinfo=UTC))
+
+
+@dataclass(frozen=True)
+class _EventWithoutAggregateId:
+    event_id: object
+    occurred_at: object
+
+
+@dataclass(frozen=True)
+class _EventWithMultipleAggregateIds:
+    event_id: object
+    occurred_at: object
+    source_id: object
+    target_id: object
+
+
+class TestIntegrationEventMapper:
+    def setup_method(self) -> None:
+        self._mapper = IntegrationEventMapper(
+            {
+                "NodeExecutionCreatedEvent": NodeExecutionCreatedIntegrationEvent,
+                "SessionExecutionCreatedEvent": SessionExecutionCreatedIntegrationEvent,
+                "SessionOpenedEvent": SessionOpenedIntegrationEvent,
+            }
+        )
+
+    def test_map_session_opened(self) -> None:
+        event = SessionOpenedEvent.now(
+            session_id=SessionId.generate(),
+            user_id=UserIdRef("user-1"),
+            now=_NOW,
+        )
+        result: IntegrationEvent = self._mapper.map(event)  # type: ignore[assignment]
+        assert type(result).__name__ == "SessionOpenedIntegrationEvent"
+        assert isinstance(result, IntegrationEvent)
+        assert result.correlation_id == get_correlation_id()
+        assert result.causation_id == get_causation_id()
+        assert result.session_id == event.session_id.value  # type: ignore[attr-defined]
+        assert result.aggregate_id == event.session_id.value  # type: ignore[attr-defined]
+        assert result.schema_version == 1
+
+    def test_map_event_with_nullable_fields(self) -> None:
+        event = NodeExecutionCreatedEvent.now(
+            node_execution_id=NodeExecutionId.generate(),
+            now=_NOW,
+        )
+        result: IntegrationEvent = self._mapper.map(event)  # type: ignore[assignment]
+        assert type(result).__name__ == "NodeExecutionCreatedIntegrationEvent"
+        assert isinstance(result, IntegrationEvent)
+        assert result.correlation_id == get_correlation_id()
+        assert result.causation_id == get_causation_id()
+        assert result.node_execution_id == event.node_execution_id.value  # type: ignore[attr-defined]
+
+    def test_map_session_execution_created(self) -> None:
+        event = SessionExecutionCreatedEvent.now(
+            session_execution_id=SessionExecutionId.generate(),
+            now=_NOW,
+        )
+        result: IntegrationEvent = self._mapper.map(event)  # type: ignore[assignment]
+        assert type(result).__name__ == "SessionExecutionCreatedIntegrationEvent"
+        assert isinstance(result, IntegrationEvent)
+        assert result.correlation_id == get_correlation_id()
+        assert result.causation_id == get_causation_id()
+        assert result.session_execution_id == event.session_execution_id.value  # type: ignore[attr-defined]
+
+    def test_unknown_event_type_raises(self) -> None:
+        class FakeEvent:
+            __module__ = "legacy.domain.fake.aggregates.fake.events.fake_event"
+            __name__ = "FakeEvent"
+            event_id = type("id", (), {"value": "x"})()
+            occurred_at = type("oa", (), {"value": datetime(2025, 1, 1, tzinfo=UTC)})()
+            aggregate_id = type("id", (), {"value": ""})()
+            aggregate_name = type("n", (), {"value": ""})()
+            schema_version = type("v", (), {"value": 1})()
+
+        with pytest.raises(
+            IntegrationMappingError, match="Brak zarejestrowanego"
+        ):
+            self._mapper.map(FakeEvent())
+
+    def test_unknown_event_type_is_still_a_value_error(self) -> None:
+        """IntegrationMappingError must remain catchable as ValueError."""
+
+        class FakeEvent:
+            __module__ = "legacy.domain.fake.aggregates.fake.events.fake_event"
+            __name__ = "FakeEvent"
+            event_id = type("id", (), {"value": "x"})()
+            occurred_at = type("oa", (), {"value": datetime(2025, 1, 1, tzinfo=UTC)})()
+            aggregate_id = type("id", (), {"value": ""})()
+            aggregate_name = type("n", (), {"value": ""})()
+            schema_version = type("v", (), {"value": 1})()
+
+        with pytest.raises(ValueError):
+            self._mapper.map(FakeEvent())
+
+    def test_mapper_requires_an_explicit_registry(self) -> None:
+        with pytest.raises(TypeError):
+            IntegrationEventMapper()  # type: ignore[call-arg]
+
+    def test_event_without_aggregate_id_is_rejected(self) -> None:
+        event = _EventWithoutAggregateId(
+            event_id=type("id", (), {"value": "event-1"})(),
+            occurred_at=type("oa", (), {"value": _NOW.value})(),
+        )
+        mapper = IntegrationEventMapper(
+            {"_EventWithoutAggregateId": IntegrationEvent}
+        )
+
+        with pytest.raises(IntegrationMappingError, match="dokładnie jedno"):
+            mapper.map(event)
+
+    def test_event_with_multiple_aggregate_ids_is_rejected(self) -> None:
+        event = _EventWithMultipleAggregateIds(
+            event_id=type("id", (), {"value": "event-2"})(),
+            occurred_at=type("oa", (), {"value": _NOW.value})(),
+            source_id=type("id", (), {"value": "source-1"})(),
+            target_id=type("id", (), {"value": "target-1"})(),
+        )
+        mapper = IntegrationEventMapper(
+            {"_EventWithMultipleAggregateIds": IntegrationEvent}
+        )
+
+        with pytest.raises(IntegrationMappingError, match="dokładnie jedno"):
+            mapper.map(event)

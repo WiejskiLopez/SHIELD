@@ -1,0 +1,50 @@
+"""Unit tests for TaskExecution entity."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+
+from shell.execution_service.domain.execution.aggregates.task_execution.task_execution import (
+    TaskExecution,
+)
+from shell.execution_service.domain.execution.aggregates.task_execution.value_objects.task_execution_id import (
+    TaskExecutionId,
+)
+from shell.execution_service.domain.execution.aggregates.task_execution.value_objects.task_name import (
+    TaskName,
+)
+from shell.execution_service.domain.execution.aggregates.task_execution.value_objects.work_dir import (
+    WorkDir,
+)
+from shell.execution_service.domain.execution.aggregates.workflow.value_objects.workflow_id import (
+    WorkflowId,
+)
+from shell.platform.domain.value_objects.created_at import CreatedAt
+
+_NOW = CreatedAt.from_datetime(datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC))
+
+_SAMPLE_WORK_DIR = "workdir/sample"
+
+
+class TestTaskExecution:
+    def test_create_emits_task_created_event(self) -> None:
+        task_execution = TaskExecution.create(
+            id_=TaskExecutionId.generate(),
+            name=TaskName("my-task"),
+            now=_NOW,
+            workflow_id=WorkflowId("wf-1"),
+            work_dir=WorkDir(_SAMPLE_WORK_DIR),
+        )
+        events = task_execution.pull_events()
+        assert len(events) == 1
+        assert type(events[0]).__name__ == "TaskExecutionCreatedEvent"
+
+    def test_create_requires_explicit_name(self) -> None:
+        task_execution = TaskExecution.create(
+            id_=TaskExecutionId.generate(),
+            name=TaskName("my-task"),
+            now=_NOW,
+            workflow_id=WorkflowId("wf-1"),
+            work_dir=WorkDir(_SAMPLE_WORK_DIR),
+        )
+        assert task_execution.name.value == "my-task"

@@ -1,0 +1,15 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from shell.platform.domain.base.value_object import ValueObject
+from shell.platform.domain.exceptions.domain_error import DomainError
+
+
+@dataclass(frozen=True, slots=True)
+class RepoUrl(ValueObject):
+    value: str | None
+
+    def __post_init__(self) -> None:
+        if self.value is not None and not self.value.strip():
+            raise DomainError("RepoUrl cannot be empty string — use None instead")

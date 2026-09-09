@@ -1,0 +1,202 @@
+"""Entrypoint for the standalone User bounded context API."""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import os
+from pathlib import Path
+from typing import Any
+
+import uvicorn
+
+from shell.platform.bootstrap.logging.setup_logging import setup_logging
+from shell.platform.bootstrap.tracing import install_trace_id_generator
+from shell.platform.framework.bootstrap.server import build_service_uvicorn_config
+from shell.platform.infrastructure.configuration.shell_config import LoadedConfiguration
+from shell.platform.infrastructure.messaging.event.event_worker import run_event_inbox_worker
+from shell.platform.infrastructure.messaging.inbox.inbox_batch_result import (
+    InboxBatchResult,
+)
+from shell.platform.infrastructure.messaging.polling_worker import (
+    PollingWorker,
+    PollingWorkerConfig,
+)
+from shell.platform.infrastructure.messaging.worker_heartbeat import WorkerHeartbeatRecorder
+from shell.user_service.bootstrap.user.container.user_core_container import (
+    UserCoreContainer,
+    configure_user_container,
+)
+from shell.user_service.framework.user.api.app import (
+    USER_PUBLIC_EXACT,
+    USER_PUBLIC_PREFIX,
+    create_user_app,
+)
+from shell.user_service.infrastructure.user.seed import seed_user_dev_data
+from shell.user_service.migrations.baseline import run_user_baseline
+
+
+class _PollingOutboxRelay:
+    """Adapt relay (event lub command) do protokołu PollingTask."""
+
+    def __init__(self, relay: Any) -> None:
+        self._relay = relay
+
+    async def run_once(self) -> InboxBatchResult:
+        result = await self._relay.run_once()
+        if isinstance(result, int):
+            return InboxBatchResult(
+                claimed_count=result,
+                processed_count=0,
+                retried_count=0,
+                dead_lettered_count=0,
+                failed_count=0,
+                duration_ms=0,
+            )
+        return InboxBatchResult(
+            claimed_count=result.claimed_count,
+            processed_count=result.processed_count,
+            retried_count=result.retried_count,
+            dead_lettered_count=result.dead_lettered_count,
+            failed_count=result.failed_count,
+            duration_ms=result.duration_ms,
+        )
+
+
+async def _run_outbox_relay(container: UserCoreContainer) -> None:
+    """Periodically deliver the User BC outbox to the broker (Faza 9)."""
+    config = LoadedConfiguration.from_environment(
+        Path(__file__).resolve().parent / "config", service_name="user"
+    )
+    runtime = config.platform_runtime
+    setup_logging(runtime.log_level)
+    worker_id = "user-outbox-relay"
+    heartbeat = WorkerHeartbeatRecorder(
+        container.session_factory(),
+        container.persistence_delivery_models().worker_heartbeat,
+        worker_id,
+    )
+    worker = PollingWorker(
+        _PollingOutboxRelay(container.outbox_to_transport_relay_factory()),
+        PollingWorkerConfig(
+            worker_id=worker_id,
+            poll_interval_seconds=runtime.events.worker_poll_interval,
+        ),
+        heartbeat=heartbeat.beat,
+    )
+    await worker.run()
+
+
+async def _run_command_outbox_relay(container: UserCoreContainer) -> None:
+    """Periodically deliver the User BC command outbox to the broker."""
+    config = LoadedConfiguration.from_environment(
+        Path(__file__).resolve().parent / "config", service_name="user"
+    )
+    runtime = config.platform_runtime
+    worker_id = "user-command-outbox-relay"
+    heartbeat = WorkerHeartbeatRecorder(
+        container.session_factory(),
+        container.persistence_delivery_models().worker_heartbeat,
+        worker_id,
+    )
+    worker = PollingWorker(
+        _PollingOutboxRelay(container.command_outbox_to_transport_relay_factory()),
+        PollingWorkerConfig(
+            worker_id=worker_id,
+            poll_interval_seconds=runtime.events.worker_poll_interval,
+        ),
+        heartbeat=heartbeat.beat,
+    )
+    await worker.run()
+
+
+async def _run_command_worker(container: UserCoreContainer) -> None:
+    config = LoadedConfiguration.from_environment(
+        Path(__file__).resolve().parent / "config", service_name="user"
+    )
+    runtime = config.platform_runtime
+    await run_event_inbox_worker(
+        consumer=container.rabbit_command_inbox_consumer_factory(),
+        processor=container.command_inbox_processor_factory(),
+        session_factory=container.session_factory(),
+        heartbeat_model=container.persistence_delivery_models().worker_heartbeat,
+        worker_id=container.config.command_worker_id(),
+        poll_interval_seconds=runtime.events.worker_poll_interval,
+    )
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Shell User BC API server")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8001)
+    parser.add_argument("--reload", action="store_true")
+    parser.add_argument("--db-url", default=None)
+    parser.add_argument("--api-key", default=None)
+    parser.add_argument("--worker", action="store_true")
+    args = parser.parse_args()
+
+    config = LoadedConfiguration.from_environment(
+        Path(__file__).resolve().parent / "config", service_name="user"
+    )
+    deployment = config.deployment
+    runtime = config.platform_runtime
+    service = config.service
+    auth = config.auth
+    database_url = (
+        args.db_url or os.environ.get("USER_SERVICE_DATABASE_URL") or deployment.database_url
+    )
+    broker_url = runtime.events.broker_url
+    api_key = os.environ.get("SHELL_API_KEY") or auth.api_key
+    jwt_secret = os.environ.get("USER_SERVICE_JWT_SECRET", "")
+    if not api_key:
+        raise ValueError("SHELL_API_KEY is required")
+
+    container = UserCoreContainer()
+    container.config.db_url.from_value(database_url)
+    container.config.broker_url.from_value(broker_url)
+    container.config.worker_id.from_value("user-event-processor")
+    container.config.command_worker_id.from_value("user-command-processor")
+    container.config.worker_heartbeat_interval_seconds.from_value(
+        runtime.events.worker_heartbeat_interval_seconds
+    )
+    container.config.worker_max_batch_time_seconds.from_value(
+        runtime.events.worker_max_batch_time_seconds
+    )
+    configure_user_container(container)
+    install_trace_id_generator()
+    app = create_user_app(
+        container,
+        api_key=api_key if args.api_key is None else args.api_key,
+        jwt_secret=jwt_secret,
+        public_exact=USER_PUBLIC_EXACT,
+        public_prefix=USER_PUBLIC_PREFIX,
+    )
+
+    server = uvicorn.Server(
+        build_service_uvicorn_config(
+            app,
+            service="user",
+            host=args.host,
+            port=args.port,
+            reload=args.reload,
+        )
+    )
+
+    async def run() -> None:
+        await run_user_baseline(database_url)
+        if service.seed_dev_data:
+            await seed_user_dev_data(database_url)
+        if args.worker:
+            await asyncio.gather(
+                _run_outbox_relay(container),
+                _run_command_outbox_relay(container),
+                _run_command_worker(container),
+            )
+        else:
+            await server.serve()
+
+    asyncio.run(run())
+
+
+if __name__ == "__main__":
+    main()

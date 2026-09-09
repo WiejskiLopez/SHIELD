@@ -1,0 +1,1 @@
+database_url: "sqlite+aiosqlite:///shell/session_service/docker/dev_db/dev_shell.db"

@@ -1,0 +1,125 @@
+"""SQLite integration tests — missing integration event must fail, not drop silently."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
+
+import pytest
+from sqlalchemy import select
+
+from shell.platform.domain.events import DomainEvent
+from shell.platform.domain.value_objects.created_at import CreatedAt
+from shell.platform.domain.value_objects.occurred_at import OccurredAt
+from shell.platform.infrastructure.mapping.integration_event_mapper import (
+    IntegrationEventMapper,
+)
+from shell.platform.infrastructure.mapping.integration_mapping_error import (
+    IntegrationMappingError,
+)
+from shell.session_service.domain.session.aggregates.session import Session
+from shell.session_service.domain.session.aggregates.session.repositories.session_repository import (
+    SessionRepository,
+)
+from shell.session_service.domain.session.aggregates.session.value_objects.session_id import (
+    SessionId,
+)
+from shell.session_service.domain.session.value_objects.user_id_ref import UserIdRef
+from shell.session_service.infrastructure.session.persistence.sql.models.base import (
+    PERSISTENCE_DELIVERY_MODELS,
+)
+from shell.session_service.infrastructure.session.session.persistence.sql.unit_of_work import (
+    SqlAlchemySessionUnitOfWork,
+)
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class _UnmappedDomainEvent(DomainEvent):
+    """A domain event that has no ``*IntegrationEvent`` counterpart."""
+
+
+_UnmappedDomainEvent.__module__ = (
+    "shell.session_service.domain.session.aggregates.session.events.no_such_event"
+)
+
+
+class TestMissingIntegrationEvent:
+    async def test_mapper_raises_for_unmapped_domain_event(self) -> None:
+        with pytest.raises(IntegrationMappingError, match="Brak zarejestrowanego"):
+            IntegrationEventMapper({}).map(
+                _UnmappedDomainEvent(
+                    occurred_at=OccurredAt.from_datetime(datetime(2025, 1, 1, tzinfo=UTC))
+                )
+            )
+
+    async def test_uow_save_with_mapper_does_not_write_outbox_when_mapping_fails(
+        self,
+        session_factory: async_sessionmaker,
+        sql_uow: SqlAlchemySessionUnitOfWork,
+    ) -> None:
+        mapper = IntegrationEventMapper({})
+        uow = SqlAlchemySessionUnitOfWork(
+            session_factory, mapper=mapper, models=PERSISTENCE_DELIVERY_MODELS
+        )
+
+        session = Session.open(
+            id_=SessionId("unmapped-session"),
+            user_id=UserIdRef("user-x"),
+            now=CreatedAt.from_datetime(datetime(2025, 1, 1, tzinfo=UTC)),
+        )
+        # Append a domain event that has no integration contract to simulate a
+        # missing mapping.
+        session.append_event(
+            _UnmappedDomainEvent(
+                occurred_at=OccurredAt.from_datetime(datetime(2025, 1, 1, tzinfo=UTC))
+            )
+        )
+
+        with pytest.raises(IntegrationMappingError):
+            async with uow as unit_of_work:
+                await unit_of_work.save(SessionRepository, session)
+
+        async with session_factory() as connection:
+            outbox_rows = (
+                (await connection.execute(select(PERSISTENCE_DELIVERY_MODELS.events.outbox)))
+                .scalars()
+                .all()
+            )
+        assert outbox_rows == []
+
+    async def test_uow_save_with_mapper_does_not_persist_aggregate_when_mapping_fails(
+        self,
+        session_factory: async_sessionmaker,
+        sql_uow: SqlAlchemySessionUnitOfWork,
+    ) -> None:
+        mapper = IntegrationEventMapper({})
+        uow = SqlAlchemySessionUnitOfWork(
+            session_factory, mapper=mapper, models=PERSISTENCE_DELIVERY_MODELS
+        )
+
+        session = Session.open(
+            id_=SessionId("unmapped-session-2"),
+            user_id=UserIdRef("user-x"),
+            now=CreatedAt.from_datetime(datetime(2025, 1, 1, tzinfo=UTC)),
+        )
+        session.append_event(
+            _UnmappedDomainEvent(
+                occurred_at=OccurredAt.from_datetime(datetime(2025, 1, 1, tzinfo=UTC))
+            )
+        )
+
+        with pytest.raises(IntegrationMappingError):
+            async with uow as unit_of_work:
+                await unit_of_work.save(SessionRepository, session)
+
+        from shell.session_service.infrastructure.session.session.persistence.sql.models.session import (
+            SessionModel,
+        )
+
+        async with session_factory() as connection:
+            rows = (await connection.execute(select(SessionModel))).scalars().all()
+        assert rows == []

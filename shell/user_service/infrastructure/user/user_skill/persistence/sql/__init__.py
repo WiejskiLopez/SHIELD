@@ -1,0 +1,5 @@
+from shell.user_service.infrastructure.user.user_skill.persistence.memory.in_memory_user_skill_repository import (
+    InMemoryUserSkillRepository,
+)
+
+__all__ = ["InMemoryUserSkillRepository"]

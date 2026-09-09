@@ -1,0 +1,193 @@
+#!/usr/bin/env pwsh
+<# 
+.SYNOPSIS
+    Runs all test suites for the SHELL project.
+
+.DESCRIPTION
+    Runs unit tests, integration tests (if Postgres available), and optionally lint/type checks.
+    Uses pytest markers for test selection instead of hardcoded paths.
+#>
+
+param(
+    [switch]$UnitOnly,
+    [switch]$IntegrationOnly,
+    [switch]$SkipLint,
+    [switch]$SkipTypeCheck,
+    [switch]$SkipSecurity,       
+    [switch]$SkipArchCheck,      
+    [int]$SecurityAuditTimeout = 60,
+    [switch]$Verbose
+)
+
+$ErrorActionPreference = "Stop"
+$projectRoot = $PSScriptRoot
+
+Write-Host "=== SHELL Project Test Runner ===" -ForegroundColor Cyan
+Write-Host "Project root: $projectRoot" -ForegroundColor Gray
+
+# Type check (mypy) — uses --no-incremental to avoid a cache corruption bug
+# in mypy 2.1.0 on Windows where stub packages (e.g. types-PyYAML) are
+# spuriously reported as "not installed" after the first incremental build.
+$env:MYPY_NO_INCREMENTAL = "1"
+
+$bcs = @("platform", "definition_service", "execution_service", "ingestion_service", "project_service", "scheduling_service", "session_service", "user_service")
+$testRoot = "shell/tests"
+$python = if ($env:OS -eq "Windows_NT") {
+    Join-Path $projectRoot ".venv\Scripts\python.exe"
+} else {
+    Join-Path $projectRoot ".venv/bin/python"
+}
+if (-not (Test-Path -LiteralPath $python)) {
+    $python = (Get-Command python -ErrorAction Stop).Source
+}
+
+function Run-Command {
+    param(
+        [string]$Command,
+        [string]$Description,
+        [switch]$AllowFailure
+    )
+    Write-Host "`n--- $Description ---" -ForegroundColor Yellow
+    Write-Host "Running: $Command" -ForegroundColor Gray
+    $parseErrors = $null
+    $tokens = [System.Management.Automation.PSParser]::Tokenize($Command, [ref]$parseErrors) |
+        Where-Object { $_.Type -in @("Command", "CommandArgument", "String") }
+    if ($parseErrors -or $tokens.Count -eq 0) {
+        throw "Unable to parse command: $Command"
+    }
+    $filePath = $tokens[0].Content
+    $argumentList = @($tokens | Select-Object -Skip 1 | ForEach-Object Content)
+    $process = Start-Process -FilePath $filePath -ArgumentList $argumentList -Wait -NoNewWindow -PassThru
+    if ($process.ExitCode -ne 0 -and -not $AllowFailure) {
+        Write-Host "FAILED: $Description" -ForegroundColor Red
+        exit $process.ExitCode
+    }
+    Write-Host "OK: $Description" -ForegroundColor Green
+}
+
+# Check if Postgres is available for integration tests
+$pgTestUrl = $env:POSTGRES_TEST_URL
+$hasPostgres = -not [string]::IsNullOrEmpty($pgTestUrl)
+
+if ($hasPostgres) {
+    Write-Host "PostgreSQL detected (POSTGRES_TEST_URL set)" -ForegroundColor Green
+} else {
+    Write-Host "PostgreSQL not configured (POSTGRES_TEST_URL not set) - integration tests will be skipped" -ForegroundColor Yellow
+}
+
+# Unit tests — run per BC for clear reporting
+if (-not $IntegrationOnly) {
+    foreach ($bc in $bcs) {
+        $path = "$testRoot/$bc"
+        $unitPaths = @(Get-ChildItem -LiteralPath $path -Directory -Filter "unit" -Recurse -ErrorAction SilentlyContinue)
+        if ($unitPaths) {
+            foreach ($unitPath in $unitPaths) {
+                Run-Command "$python -m pytest $($unitPath.FullName) -v" "$bc Unit Tests ($($unitPath.FullName))"
+            }
+        }
+        else {
+            Write-Host "Skipping $bc (no unit tests)" -ForegroundColor Gray
+        }
+    }
+    # Architecture tests (shared, not BC-specific)
+    Run-Command "$python -m pytest $testRoot/architecture -v" "Architecture Tests"
+}
+
+# E2E tests
+if (-not $IntegrationOnly -and -not $UnitOnly) {
+    foreach ($bc in $bcs) {
+        $path = "$testRoot/$bc"
+        $tests = Get-ChildItem -LiteralPath "$path/e2e" -Filter "test_*.py" -Recurse -ErrorAction SilentlyContinue
+        if ($tests) {
+            Run-Command "$python -m pytest $path/e2e -v" "$bc E2E Tests"
+        } else {
+            Write-Host "Skipping $bc (no e2e tests)" -ForegroundColor Gray
+        }
+    }
+}
+
+# Integration tests (only if Postgres available)
+if (-not $UnitOnly -and $hasPostgres) {
+    foreach ($bc in $bcs) {
+        $path = "$testRoot/$bc"
+        $tests = Get-ChildItem -LiteralPath "$path/integration" -Filter "test_*.py" -Recurse -ErrorAction SilentlyContinue
+        if ($tests) {
+            Run-Command "$python -m pytest $path/integration -v" "$bc Integration Tests"
+        } else {
+            Write-Host "Skipping $bc (no integration tests)" -ForegroundColor Gray
+        }
+    }
+}
+elseif (-not $UnitOnly -and -not $hasPostgres) {
+    Write-Host "`n--- Integration Tests ---" -ForegroundColor Yellow
+    Write-Host "Skipped: POSTGRES_TEST_URL not set" -ForegroundColor Yellow
+}
+
+# Platform delivery integration (SQLite) + system + contracts — ALWAYS run,
+# regardless of Postgres/Rabbit availability. These are the ref2/ref4 critical
+# scenarios (atomicity, heartbeat, claim, readiness,
+# retention, replay, relay, two-BC flow) and must not silently skip.
+if (-not $UnitOnly) {
+    Run-Command "$python -m pytest shell/tests/platform/integration/sql_sqlite -ra" "Platform Delivery SQLite Integration"
+    Run-Command "$python -m pytest shell/tests/system -ra" "System Tests (two-BC flow)"
+    Run-Command "$python -m pytest shell/tests/contracts -ra" "Contract Tests"
+}
+
+# Lint (ruff) - only if not skipped
+if (-not $SkipLint) {
+    Run-Command "$python -m ruff check shell shell/tests" "Lint (ruff)"
+    Run-Command "$python -m ruff format --check shell shell/tests" "Format Check (ruff)"
+}
+
+# Type check (mypy) - only if not skipped
+if (-not $SkipTypeCheck) {
+    Run-Command "$python -m mypy --no-incremental shell" "Type Check (mypy)"
+}
+
+if (-not $SkipArchCheck) {
+    Run-Command "$projectRoot\.venv\Scripts\import-linter.exe lint" "Architecture Boundary Check"
+}
+
+if (-not $SkipSecurity) {
+    Write-Host "`n--- Dependency Vulnerability Audit ---" -ForegroundColor Yellow
+    $pipAudit = "$projectRoot\.venv\Scripts\pip-audit.exe"
+    $pipAuditCache = Join-Path $env:TEMP "shell-pip-audit-cache"
+    Write-Host "Running: $pipAudit (timeout ${SecurityAuditTimeout}s)" -ForegroundColor Gray
+    $pipJob = Start-Job -ScriptBlock {
+        param($auditPath, $cacheDir)
+        & $auditPath "--timeout", "30", "--progress-spinner", "off", "--cache-dir", $cacheDir, "--strict" 2>&1
+        exit $LASTEXITCODE
+    } -ArgumentList $pipAudit, $pipAuditCache
+    try {
+        if ($null -eq ($pipJob | Wait-Job -Timeout $SecurityAuditTimeout)) {
+            Write-Host "FAILED: Dependency Vulnerability Audit (timeout)" -ForegroundColor Red
+            exit 1
+        }
+        $output = Receive-Job -Job $pipJob
+        if ($null -ne $output) { $output | ForEach-Object { Write-Host $_ } }
+        if ($pipJob.State -eq 'Failed') {
+            Write-Host "FAILED: Dependency Vulnerability Audit" -ForegroundColor Red
+            exit 1
+        }
+        Write-Host "OK: Dependency Vulnerability Audit" -ForegroundColor Green
+    } finally {
+        $pipJob | Stop-Job -ErrorAction SilentlyContinue | Remove-Job -Force -ErrorAction SilentlyContinue
+    }
+}
+
+if (-not $SkipSecurity) {
+    Run-Command "$projectRoot\.venv\Scripts\bandit.exe -r shell --exclude shell/.venv -ll" "Security Code Scanning (Bandit)"
+}
+
+# Coverage — run unit tests with coverage
+if (-not $UnitOnly -and -not $IntegrationOnly) {
+    $coveragePathList = @("$testRoot/platform/unit")
+    $coveragePathList += $bcs |
+        Where-Object { $_ -ne "platform" } |
+        ForEach-Object { "$testRoot/$_" }
+    $coveragePaths = $coveragePathList -join " "
+    Run-Command "$python -m pytest $coveragePaths --cov=shell --cov-fail-under=80 -v" "Unit Tests with Coverage"
+}
+
+Write-Host "`n=== All requested checks completed ===" -ForegroundColor Green
+exit 0

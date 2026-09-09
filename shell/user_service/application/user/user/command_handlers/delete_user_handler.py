@@ -1,0 +1,54 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from shell.platform.application.command_handlers.command_handler import CommandHandler
+from shell.platform.domain.value_objects.deleted_at import DeletedAt
+from shell.user_service.application.user.user.commands.delete_user_command import (
+    DeleteUserCommand,
+)
+from shell.user_service.domain.user.aggregates.user.repositories.user_repository import (
+    UserRepository,
+)
+from shell.user_service.domain.user.value_objects.user_id import UserId
+
+if TYPE_CHECKING:
+    from shell.platform.application.ports.persistence.unit_of_work import UnitOfWork
+    from shell.platform.domain.ports.time import Clock
+
+
+__all__ = ["DeleteUserHandler", "UserNotFoundError", "UserAlreadyDeletedError"]
+
+
+from shell.user_service.application.user.user.exceptions.user_already_deleted_error import (
+    UserAlreadyDeletedError,
+)
+from shell.user_service.application.user.user.exceptions.user_not_found_error import (
+    UserNotFoundError,
+)
+
+
+class DeleteUserHandler(CommandHandler[DeleteUserCommand]):
+    def __init__(
+        self,
+        unit_of_work: UnitOfWork,
+        clock: Clock,
+    ) -> None:
+        self._unit_of_work = unit_of_work
+        self._clock = clock
+
+    async def handle(self, command: DeleteUserCommand) -> None:
+        user_id = UserId(command.user_id)
+
+        async with self._unit_of_work as unit_of_work:
+            user = await unit_of_work.repository(UserRepository).get_by_id(user_id)
+            if user is None:
+                raise UserNotFoundError(f"User '{command.user_id}' not found")
+
+            if user.is_deleted:
+                raise UserAlreadyDeletedError(f"User '{command.user_id}' is already deleted")
+
+            now = DeletedAt.from_datetime(self._clock.now())
+            user.delete(now)
+            await unit_of_work.save(UserRepository, user)
+            await unit_of_work.commit()

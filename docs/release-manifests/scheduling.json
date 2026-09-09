@@ -1,0 +1,19 @@
+{
+  "service": "shell-scheduling-service",
+  "version": "0.1.0",
+  "commit": "627661bbfdd9d34d1e5fb75457f90884f9760103",
+  "source_status": "clean",
+  "image": "shell-scheduling-service:verified-627661bb",
+  "image_id": "sha256:5e21b2084e066f5210ceb77a556aea7e728ca805ef82aec5d2b31556e5ecfc5f",
+  "image_digest": "sha256:5e21b2084e066f5210ceb77a556aea7e728ca805ef82aec5d2b31556e5ecfc5f",
+  "image_digest_type": "local-image-id",
+  "independence_filesystem_digest": "96c2e13f0ed53de0c7bc4c39948bf61f792c552994e355ee6fef03af10d5327b",
+  "platform_version": "0.1.0",
+  "migration_head": "scheduling_0004_saga_schema",
+  "artifact_sha256": {
+    "shell_platform-0.1.0-py3-none-any.whl": "5adedb1df8a7c46890b75180e6a75afa75651f81a42c515f2af7e4cedc32bce0",
+    "shell_scheduling_service-0.1.0-py3-none-any.whl": "607963be1e31db9aa31e6af300e6d8dbb3a72ac4e2c4895fc0c7bf66b990dff8"
+  },
+  "verified_at": "2026-08-25T22:34:48.158501+00:00",
+  "status": "verified"
+}

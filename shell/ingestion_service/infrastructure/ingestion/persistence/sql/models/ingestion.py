@@ -1,0 +1,31 @@
+from __future__ import annotations
+
+from datetime import datetime  # noqa: TC003 - SQLAlchemy resolves Mapped[...] at class definition
+
+from sqlalchemy.orm import Mapped, declared_attr, mapped_column
+
+from shell.ingestion_service.infrastructure.ingestion.persistence.sql.models.base import (
+    IngestionSqlAlchemyModelBase,
+)
+from shell.platform.infrastructure.persistence.sql.models.json_str_type import JsonStrType
+from shell.platform.infrastructure.persistence.sql.models.mixins import VersionedMixin
+from shell.platform.types import JsonStr
+
+
+class IngestionModel(IngestionSqlAlchemyModelBase, VersionedMixin):
+    __tablename__ = "ingestion"
+
+    id: Mapped[str] = mapped_column(primary_key=True)
+    ingestion_data: Mapped[JsonStr] = mapped_column(
+        JsonStrType, nullable=False, default=lambda: JsonStr("{}")
+    )
+    ingestion_context: Mapped[JsonStr] = mapped_column(
+        JsonStrType, nullable=False, default=lambda: JsonStr("{}")
+    )
+    created_at: Mapped[datetime] = mapped_column(nullable=False)
+    changed_at: Mapped[datetime | None] = mapped_column(nullable=True, default=None)
+    deleted_at: Mapped[datetime | None] = mapped_column(nullable=True, default=None)
+
+    @declared_attr  # type: ignore[arg-type]
+    def __mapper_args__(cls) -> dict[str, object]:
+        return {"version_id_col": cls.version}

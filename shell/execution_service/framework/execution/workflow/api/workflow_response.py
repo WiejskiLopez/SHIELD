@@ -1,0 +1,15 @@
+from __future__ import annotations
+
+from datetime import datetime
+
+from pydantic import BaseModel
+
+
+class WorkflowResponse(BaseModel):
+    id: str
+    status: str
+    session_id: str
+    project_id: str
+    created_at: datetime
+    changed_at: datetime | None = None
+    deleted_at: datetime | None = None

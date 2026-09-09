@@ -1,0 +1,55 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from shell.execution_service.application.execution.edge_link_execution.commands.create_edge_link_execution_command import (
+    CreateEdgeLinkExecutionCommand,
+)
+from shell.execution_service.domain.execution.aggregates.edge_link_execution.edge_link_execution import (
+    EdgeLinkExecution,
+)
+from shell.execution_service.domain.execution.aggregates.edge_link_execution.repositories.edge_link_execution_repository import (
+    EdgeLinkExecutionRepository,
+)
+from shell.execution_service.domain.execution.aggregates.edge_link_execution.value_objects.edge_link_execution_id import (
+    EdgeLinkExecutionId,
+)
+from shell.platform.application.command_handlers.command_handler import CommandHandler
+from shell.platform.domain.value_objects.created_at import CreatedAt
+
+if TYPE_CHECKING:
+    from shell.platform.application.ports.persistence.unit_of_work import UnitOfWork
+    from shell.platform.domain.ports.identity import IdGenerator
+    from shell.platform.domain.ports.time import Clock
+
+
+class CreateEdgeLinkExecutionHandler(CommandHandler[CreateEdgeLinkExecutionCommand]):
+    def __init__(
+        self,
+        unit_of_work: UnitOfWork,
+        id_generator: IdGenerator,
+        clock: Clock,
+    ) -> None:
+        self._unit_of_work = unit_of_work
+        self._id_generator = id_generator
+        self._clock = clock
+
+    async def handle(self, command: CreateEdgeLinkExecutionCommand) -> str:
+        from shell.execution_service.domain.execution.aggregates.edge_execution.value_objects.edge_execution_id import (
+            EdgeExecutionId,
+        )
+        from shell.execution_service.domain.execution.aggregates.node_execution.value_objects.node_execution_id import (
+            NodeExecutionId,
+        )
+
+        now = CreatedAt.from_datetime(self._clock.now())
+        link = EdgeLinkExecution.create(
+            id_=self._id_generator.new_id(EdgeLinkExecutionId),
+            node_execution_id=NodeExecutionId(command.node_execution_id),
+            edge_execution_id=EdgeExecutionId(command.edge_execution_id),
+            now=now,
+        )
+        async with self._unit_of_work as unit_of_work:
+            await unit_of_work.save(EdgeLinkExecutionRepository, link)
+            await unit_of_work.commit()
+        return link.id.value

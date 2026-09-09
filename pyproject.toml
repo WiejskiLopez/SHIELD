@@ -1,0 +1,181 @@
+[build-system]
+requires = ["setuptools>=42"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shell"
+version = "0.1.0"
+description = "File-system-driven agent runtime shared library"
+license = "MIT"
+authors = [{ name = "WiejskiLopez" }]
+requires-python = ">=3.14"
+dependencies = [
+    "aio-pika>=10.0.1",
+    "alembic>=1.18.5",
+    "aiosqlite>=0.20.0",
+    "apscheduler>=3.11.3",
+    "asyncpg>=0.31.0",
+    "dependency-injector>=4.49.1",
+    "fastapi>=0.139.0",
+    "httpx>=0.28.1",
+    "motor>=3.7.1",
+    "pydantic>=2.13.4",
+    "PyJWT>=2.10.1",
+    "pyyaml>=6.0",
+    "sqlalchemy>=2.0.51",
+    "uvicorn[standard]>=0.30.0",
+]
+
+# keep in sync: optional-dependencies.dev == dependency-groups.dev
+[project.optional-dependencies]
+dev = [
+    "bandit>=1.8.0",
+    "cryptography>=46.0.0",
+    "import-linter>=2.0.0",
+    "mypy>=1.15",
+    "pip-audit>=2.9.0",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.2.0",
+    "pytest-cov>=6.2.0",
+    "ruff>=0.15.20",
+]
+
+[project.scripts]
+shell-retention-definition = "shell.definition_service.infrastructure.definition.cli.retention:main"
+shell-retention-execution = "shell.execution_service.infrastructure.execution.cli.retention:main"
+shell-retention-ingestion = "shell.ingestion_service.infrastructure.ingestion.cli.retention:main"
+shell-retention-project = "shell.project_service.infrastructure.project.cli.retention:main"
+shell-retention-scheduling = "shell.scheduling_service.infrastructure.scheduling.cli.retention:main"
+shell-retention-session = "shell.session_service.infrastructure.session.cli.retention:main"
+shell-retention-user = "shell.user_service.infrastructure.user.cli.retention:main"
+
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["shell*"]
+
+# keep in sync: optional-dependencies.dev == dependency-groups.dev
+[dependency-groups]
+dev = [
+    "bandit>=1.8.0",
+    "cryptography>=46.0.0",
+    "import-linter>=2.0.0",
+    "mypy>=1.15",
+    "pip-audit>=2.9.0",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.2.0",
+    "pytest-cov>=6.2.0",
+    "ruff>=0.15.20",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E1", "E4", "E7", "E9", "F", "I", "RUF100", "UP", "B", "SIM", "TC", "S"]
+ignore = []
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Body",
+    "fastapi.Header",
+]
+
+[tool.ruff.lint.flake8-type-checking]
+runtime-evaluated-base-classes = [
+    "shell.platform.infrastructure.persistence.sql.models.Base",
+    "sqlalchemy.orm.DeclarativeBase",
+    "pydantic.BaseModel",
+    "pydantic_settings.BaseSettings",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"shell/tests/**" = ["S101"]
+"shell/*_service/application/**/dto/*.py" = ["TCH001", "TCH003"]
+"shell/user_service/application/**/dto/*.py" = ["TCH001", "TCH003"]
+"shell/user_service/framework/user/user/api/*.py" = ["TCH001"]
+"shell/*/framework/**/api/*.py" = ["TCH001"]
+"shell/ingestion_service/framework/ingestion/api/*.py" = ["TCH001"]
+"**/mappers/__init__.py" = ["F401"]
+"**/repositories/__init__.py" = ["F401"]
+"shell/tests/architecture/quality/test_lint_pass__test_mypy_domain_and_application_zero_errors.py" = ["S603"]
+"shell/tests/architecture/quality/test_lint_pass__test_ruff_zero_errors.py" = ["S603"]
+"shell/tests/architecture/test_import_linter.py" = ["S603"]
+"shell/tests/platform/unit/application/authentication/test_request_signing.py" = ["S106"]
+"shell/tests/platform/unit/infrastructure/context/test_client.py" = ["S106"]
+"shell/tests/user_service/integration/platform/test_auth_middleware.py" = ["S106"]
+
+[tool.importlinter]
+root_package = "shell"
+
+[[tool.importlinter.contracts]]
+name = "Platform must not import bounded contexts"
+type = "forbidden"
+source_modules = ["shell.platform"]
+forbidden_modules = [
+    "shell.definition_service",
+    "shell.execution_service",
+    "shell.session_service",
+    "shell.user_service",
+    "shell.project_service",
+    "shell.scheduling_service",
+    "shell.ingestion_service",
+]
+
+[[tool.importlinter.contracts]]
+name = "BC must not import other BC"
+type = "forbidden"
+source_modules = [
+    "shell.definition_service",
+    "shell.execution_service",
+    "shell.session_service",
+    "shell.user_service",
+    "shell.project_service",
+    "shell.scheduling_service",
+    "shell.ingestion_service",
+]
+forbidden_modules = [
+    "shell.definition_service",
+    "shell.execution_service",
+    "shell.session_service",
+    "shell.user_service",
+    "shell.project_service",
+    "shell.scheduling_service",
+    "shell.ingestion_service",
+]
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+warn_unused_ignores = true
+explicit_package_bases = true
+exclude = []
+mypy_path = ["shell/tests/architecture", "packaging/saga-orchestration"]
+
+[[tool.mypy.overrides]]
+module = [
+    "shell.platform.bootstrap.*",
+    "shell.platform.framework.*",
+    "shell.tests.*",
+]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_calls = false
+disallow_any_generics = false
+warn_return_any = false
+
+[[tool.mypy.overrides]]
+module = [
+    "motor.*",
+    "asyncpg.*",
+    "aiosqlite.*",
+    "dependency_injector.*",
+    "alembic.*",
+    "jwt",
+]
+ignore_missing_imports = true
+

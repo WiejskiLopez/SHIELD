@@ -1,0 +1,55 @@
+name: shell-ingestion
+
+services:
+  shell-ingestion-api:
+    build:
+      context: ../../..
+      dockerfile: shell/ingestion_service/docker/Dockerfile
+    restart: unless-stopped
+    environment:
+      SHELL_DATABASE_URL: sqlite+aiosqlite:////app/shell_dev/dev_shell.db
+      SHELL_API_KEY: ${SHELL_API_KEY:?SHELL_API_KEY is required}
+      SHELL_EVENTS_BROKER_URL: ${SHELL_EVENTS_BROKER_URL:?SHELL_EVENTS_BROKER_URL is required}
+      SHELL_ALLOWED_ORIGINS: http://localhost:8080
+    ports:
+      - "8004:8004"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8004/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    volumes:
+      - ./dev_db:/app/shell_dev
+      - ./logs:/app/logs
+      - ./cert:/run/secrets/shell-mtls:ro
+    networks:
+      - shell-net
+
+  shell-ingestion-worker:
+    build:
+      context: ../../..
+      dockerfile: shell/ingestion_service/docker/Dockerfile
+    restart: unless-stopped
+    environment:
+      SHELL_DATABASE_URL: sqlite+aiosqlite:////app/shell_dev/dev_shell.db
+      SHELL_API_KEY: ${SHELL_API_KEY:?SHELL_API_KEY is required}
+      SHELL_EVENTS_BROKER_URL: ${SHELL_EVENTS_BROKER_URL:?SHELL_EVENTS_BROKER_URL is required}
+    command:
+      - python
+      - -m
+      - shell.ingestion_service.bootstrap.ingestion.main
+      - --worker
+    volumes:
+      - ./dev_db:/app/shell_dev
+      - ./logs:/app/logs
+      - ./cert:/run/secrets/shell-mtls:ro
+    depends_on:
+      shell-ingestion-api:
+        condition: service_healthy
+    networks:
+      - shell-net
+
+networks:
+  shell-net:
+    name: shell-net

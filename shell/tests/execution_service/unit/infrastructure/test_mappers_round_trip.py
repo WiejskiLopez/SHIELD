@@ -1,0 +1,394 @@
+"""Round-trip tests for execution-service SQL ORM model <-> domain entity mappers.
+
+Verifies each bidirectional mapper by creating an entity, mapping to a
+model, mapping back to an entity, and comparing key fields.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+
+from shell.execution_service.domain.execution.aggregates.graph_execution import GraphExecution
+from shell.execution_service.domain.execution.aggregates.graph_execution.value_objects.graph_depth import (
+    GraphDepth,
+)
+from shell.execution_service.domain.execution.aggregates.graph_execution.value_objects.graph_execution_id import (
+    GraphExecutionId,
+)
+from shell.execution_service.domain.execution.aggregates.graph_execution.value_objects.max_subgraph_depth import (
+    MaxSubgraphDepth,
+)
+from shell.execution_service.domain.execution.aggregates.node_execution.node_execution import (
+    NodeExecution,
+)
+from shell.execution_service.domain.execution.aggregates.node_execution.value_objects.node_definition_id_ref import (
+    NodeDefinitionIdRef,
+)
+from shell.execution_service.domain.execution.aggregates.node_execution.value_objects.node_execution_id import (
+    NodeExecutionId,
+)
+from shell.execution_service.domain.execution.aggregates.node_execution.value_objects.node_execution_status import (
+    NodeExecutionStatus,
+)
+from shell.execution_service.domain.execution.aggregates.node_execution.value_objects.node_position import (
+    NodePosition,
+)
+from shell.execution_service.domain.execution.aggregates.node_execution.value_objects.node_type import (
+    NodeType,
+)
+from shell.execution_service.domain.execution.aggregates.session_execution.value_objects.project_id_ref import (
+    ProjectIdRef,
+)
+from shell.execution_service.domain.execution.aggregates.session_execution.value_objects.session_id_ref import (
+    SessionIdRef,
+)
+from shell.execution_service.domain.execution.aggregates.task_execution.task_execution import (
+    TaskExecution,
+)
+from shell.execution_service.domain.execution.aggregates.task_execution.value_objects.task_execution_id import (
+    TaskExecutionId,
+)
+from shell.execution_service.domain.execution.aggregates.task_execution.value_objects.task_name import (
+    TaskName,
+)
+from shell.execution_service.domain.execution.aggregates.task_execution.value_objects.work_dir import (
+    WorkDir,
+)
+from shell.execution_service.domain.execution.aggregates.workflow import Workflow
+from shell.execution_service.domain.execution.aggregates.workflow.value_objects.workflow_id import (
+    WorkflowId,
+)
+from shell.execution_service.domain.execution.aggregates.workflow.value_objects.workflow_status import (
+    WorkflowStatus,
+)
+from shell.execution_service.infrastructure.execution.graph_execution.persistence.sql.mappers import (
+    graph_execution_entity_to_model,
+    graph_execution_model_to_entity,
+)
+from shell.execution_service.infrastructure.execution.graph_execution.persistence.sql.models import (
+    GraphExecutionModel,
+)
+from shell.execution_service.infrastructure.execution.node_execution.persistence.sql.mappers import (
+    node_execution_entity_to_model,
+    node_execution_model_to_entity,
+)
+from shell.execution_service.infrastructure.execution.node_execution.persistence.sql.models import (
+    NodeExecutionModel,
+)
+from shell.execution_service.infrastructure.execution.task_execution.persistence.sql.mappers import (
+    task_execution_entity_to_model,
+    task_execution_model_to_entity,
+)
+from shell.execution_service.infrastructure.execution.workflow.persistence.sql.mappers import (
+    workflow_entity_to_model,
+    workflow_model_to_entity,
+)
+from shell.execution_service.infrastructure.execution.workflow.persistence.sql.models import (
+    WorkflowModel,
+)
+from shell.platform.domain.value_objects.created_at import CreatedAt
+from shell.platform.domain.value_objects.occurred_at import OccurredAt
+from shell.platform.domain.value_objects.timestamp import Timestamp
+
+_NOW = datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC)
+
+_SAMPLE_WORK_DIR = "workdir/sample"
+
+
+def _raw(dt: datetime | Timestamp | None) -> datetime | None:
+    """Extract raw datetime from a datetime or Timestamp."""
+    if dt is None:
+        return None
+    return dt.value if isinstance(dt, Timestamp) else dt
+
+
+# ---------------------------------------------------------------------------
+# Workflow  (all mappers work after _raw() fix)
+# ---------------------------------------------------------------------------
+
+
+class TestWorkflowMapper:
+    def test_entity_to_model(self) -> None:
+        original = Workflow.restore(
+            id=WorkflowId("wf-1"),
+            session_id=SessionIdRef("sess-1"),
+            project_id=ProjectIdRef("proj-1"),
+            status=WorkflowStatus.ACTIVE,
+            created_at=CreatedAt.from_datetime(_NOW),
+        )
+        model = workflow_entity_to_model(original)
+
+        assert model.id == "wf-1"
+        assert model.status == original.status.value
+        assert model.session_id == "sess-1"
+        assert model.project_id == "proj-1"
+
+    def test_model_to_entity(self) -> None:
+        model = WorkflowModel(
+            id="wf-2",
+            status="ACTIVE",
+            session_id="sess-2",
+            project_id="proj-2",
+            created_at=_NOW,
+        )
+        entity = workflow_model_to_entity(model)
+
+        assert entity.id.value == "wf-2"
+        assert entity.status.value == "ACTIVE"
+        assert entity.session_id.value == "sess-2"
+        assert entity.project_id.value == "proj-2"
+
+    def test_round_trip(self) -> None:
+        original = Workflow.restore(
+            id=WorkflowId("wf-3"),
+            session_id=SessionIdRef("sess-3"),
+            project_id=ProjectIdRef("proj-3"),
+            status=WorkflowStatus.ACTIVE,
+            created_at=CreatedAt.from_datetime(_NOW),
+        )
+        model = workflow_entity_to_model(original)
+        model.created_at = _raw(model.created_at)  # type: ignore[assignment]
+
+        restored = workflow_model_to_entity(model)
+
+        assert restored.id.value == original.id.value
+        assert restored.status.value == original.status.value
+        assert restored.session_id == original.session_id
+        assert restored.project_id == original.project_id
+        assert restored.pull_events() == []
+
+
+# ---------------------------------------------------------------------------
+# TaskExecution  (model_to_entity buggy: missing description)
+# ---------------------------------------------------------------------------
+
+
+class TestTaskExecutionMapper:
+    def test_entity_to_model(self) -> None:
+        original = TaskExecution(
+            id=TaskExecutionId("te-1"),
+            name=TaskName("test-task"),
+            workflow_id=WorkflowId("wf-1"),
+            work_dir=WorkDir(_SAMPLE_WORK_DIR),
+            created_at=CreatedAt.from_datetime(_NOW),
+        )
+        model = task_execution_entity_to_model(original)
+
+        assert model.id == "te-1"
+        assert model.name == "test-task"
+        assert model.workflow_id == "wf-1"
+
+    def test_entity_to_model_with_workflow(self) -> None:
+        original = TaskExecution(
+            id=TaskExecutionId("te-2"),
+            name=TaskName("nested"),
+            workflow_id=WorkflowId("wf-1"),
+            work_dir=WorkDir(_SAMPLE_WORK_DIR),
+            created_at=CreatedAt.from_datetime(_NOW),
+        )
+        model = task_execution_entity_to_model(original)
+
+        assert model.id == "te-2"
+        assert model.workflow_id == "wf-1"
+
+    def test_round_trip(self) -> None:
+        original = TaskExecution(
+            id=TaskExecutionId("te-3"),
+            name=TaskName("test"),
+            workflow_id=WorkflowId("wf-1"),
+            work_dir=WorkDir(_SAMPLE_WORK_DIR),
+            created_at=CreatedAt.from_datetime(_NOW),
+        )
+        model = task_execution_entity_to_model(original)
+        model.created_at = _raw(model.created_at)  # type: ignore[assignment]
+
+        restored = task_execution_model_to_entity(model)
+
+        assert restored.id.value == original.id.value
+        assert restored.name.value == original.name.value
+
+
+# ---------------------------------------------------------------------------
+# GraphExecution  (entity_to_model buggy: missing timeout_at/correlation_id/tags properties)
+# ---------------------------------------------------------------------------
+
+
+class TestGraphExecutionMapper:
+    def test_entity_to_model_minimal(self) -> None:
+        original = GraphExecution(
+            id=GraphExecutionId("ge-1"),
+            created_at=CreatedAt.from_datetime(datetime(2025, 1, 1, tzinfo=UTC)),
+            task_execution_id=TaskExecutionId("te-1"),
+            depth=GraphDepth(0),
+            max_subgraph_depth=MaxSubgraphDepth(5),
+        )
+
+        model = graph_execution_entity_to_model(original)
+        assert model.timeout_at is None
+
+    def test_model_to_entity(self) -> None:
+        model = GraphExecutionModel(
+            id="ge-1",
+            task_execution_id="te-1",
+            graph_definition_id="",
+            state_input={},
+            state_output={},
+            depth=0,
+            max_subgraph_depth=5,
+            tags={},
+            status="EXECUTING",
+            created_at=_NOW,
+        )
+        entity = graph_execution_model_to_entity(model)
+
+        assert entity.id.value == "ge-1"
+        assert entity.task_execution_id.value == "te-1"
+        assert entity.status.value == "EXECUTING"
+        assert entity.parent_graph_execution_id is None
+        assert entity.pull_events() == []
+
+    def test_model_to_entity_with_nesting(self) -> None:
+        model = GraphExecutionModel(
+            id="ge-2",
+            task_execution_id="te-1",
+            graph_definition_id="",
+            parent_graph_execution_id="ge-parent",
+            state_input={},
+            state_output={},
+            depth=2,
+            max_subgraph_depth=5,
+            tags={},
+            status="COMPLETED",
+            created_at=_NOW,
+        )
+        entity = graph_execution_model_to_entity(model)
+
+        assert entity.id.value == "ge-2"
+        assert entity.status.value == "COMPLETED"
+        assert entity.parent_graph_execution_id is not None
+        assert entity.parent_graph_execution_id.value == "ge-parent"
+        assert entity.pull_events() == []
+
+    def test_round_trip(self) -> None:
+        original = GraphExecution(
+            id=GraphExecutionId("ge-3"),
+            created_at=CreatedAt.from_datetime(datetime(2025, 1, 1, tzinfo=UTC)),
+            task_execution_id=TaskExecutionId("te-1"),
+            depth=GraphDepth(0),
+            max_subgraph_depth=MaxSubgraphDepth(5),
+        )
+        model = graph_execution_entity_to_model(original)
+        restored = graph_execution_model_to_entity(model)
+
+        assert restored.id.value == original.id.value
+
+    def test_round_trip_preserves_execution_status(self) -> None:
+        from shell.execution_service.domain.execution.aggregates.graph_execution.value_objects.graph_execution_status import (
+            GraphExecutionStatus,
+        )
+
+        original = GraphExecution(
+            id=GraphExecutionId("ge-5"),
+            created_at=CreatedAt.from_datetime(datetime(2025, 1, 1, tzinfo=UTC)),
+            task_execution_id=TaskExecutionId("te-1"),
+            depth=GraphDepth(0),
+            max_subgraph_depth=MaxSubgraphDepth(5),
+        )
+        original.plan(OccurredAt.from_datetime(_NOW))
+        original.execute(OccurredAt.from_datetime(_NOW))
+        original.verify(OccurredAt.from_datetime(_NOW))
+        original.complete(OccurredAt.from_datetime(_NOW))
+        model = graph_execution_entity_to_model(original)
+        restored = graph_execution_model_to_entity(model)
+
+        assert restored.status is GraphExecutionStatus.COMPLETED
+
+    def test_model_to_entity_with_node_executions(self) -> None:
+        model = GraphExecutionModel(
+            id="ge-4",
+            task_execution_id="te-1",
+            graph_definition_id="gdef-1",
+            state_input={},
+            state_output={},
+            depth=0,
+            max_subgraph_depth=5,
+            tags={},
+            status="PENDING",
+            created_at=_NOW,
+        )
+
+        entity = graph_execution_model_to_entity(model)
+
+        assert entity.id.value == "ge-4"
+        assert entity.pull_events() == []
+
+
+# ---------------------------------------------------------------------------
+# NodeExecution  (private mappers in repository work cleanly)
+# ---------------------------------------------------------------------------
+
+
+class TestNodeExecutionMapper:
+    def test_entity_to_model_minimal(self) -> None:
+        original = NodeExecution(
+            id=NodeExecutionId("gne-1"),
+            node_definition_id=NodeDefinitionIdRef("definition-1"),
+            node_position=NodePosition(0),
+            node_type=NodeType("worker"),
+            status=NodeExecutionStatus.PENDING,
+            created_at=CreatedAt.from_datetime(_NOW),
+        )
+        model = node_execution_entity_to_model(original)
+
+        assert model.id == "gne-1"
+        assert model.position == 0
+        assert model.node_type == "worker"
+
+    def test_model_to_entity_minimal(self) -> None:
+        model = NodeExecutionModel(
+            id="gne-1",
+            position=0,
+            node_type="llm",
+            node_definition_id="definition-1",
+            status="PENDING",
+            created_at=_NOW,
+        )
+        entity = node_execution_model_to_entity(model)
+
+        assert entity.id.value == "gne-1"
+        assert entity.node_position.value == 0
+        assert entity.pull_events() == []
+
+    def test_round_trip_minimal(self) -> None:
+        original = NodeExecution(
+            id=NodeExecutionId("gne-3"),
+            node_definition_id=NodeDefinitionIdRef("definition-1"),
+            node_position=NodePosition(1),
+            node_type=NodeType("llm"),
+            status=NodeExecutionStatus.PENDING,
+            created_at=CreatedAt.from_datetime(_NOW),
+        )
+        model = node_execution_entity_to_model(original)
+        restored = node_execution_model_to_entity(model)
+
+        assert restored.id.value == original.id.value
+        assert restored.node_position == original.node_position
+        assert restored.node_type == original.node_type
+        assert restored.pull_events() == []
+
+    def test_round_trip_full(self) -> None:
+        original = NodeExecution(
+            id=NodeExecutionId("gne-4"),
+            node_definition_id=NodeDefinitionIdRef("definition-1"),
+            node_position=NodePosition(3),
+            node_type=NodeType("llm"),
+            status=NodeExecutionStatus.PENDING,
+            created_at=CreatedAt.from_datetime(_NOW),
+        )
+        model = node_execution_entity_to_model(original)
+        restored = node_execution_model_to_entity(model)
+
+        assert restored.id.value == "gne-4"
+        assert restored.node_position.value == 3
+        assert restored.node_type.value == "llm"
+        assert restored.pull_events() == []

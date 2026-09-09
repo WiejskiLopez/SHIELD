@@ -1,0 +1,16 @@
+"""Dane stanu (StateData) — ValueObject dla serializowanego stanu (JSON)."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+from shell.platform.domain.base.value_object import ValueObject
+
+if TYPE_CHECKING:
+    from shell.platform.types import JsonStr
+
+
+@dataclass(frozen=True, slots=True)
+class StateData(ValueObject):
+    value: JsonStr

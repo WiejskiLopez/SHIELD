@@ -1,0 +1,311 @@
+"""GraphExecution — agregat wykonywania grafu.
+
+Agregat reprezentujący wykonanie grafu w systemie wykonawczym. Przechowuje strukturę grafu
+oraz stan wykonania. Każda modyfikacja inicjuje zdarzenie domenowe, które warstwa aplikacji
+pobiera po udanej transakcji przez ``pull_events`` do wydawcy / outbox.
+"""
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Self
+
+from shell.execution_service.domain.execution.aggregates.graph_execution.value_objects.graph_depth import (
+    GraphDepth,
+)
+from shell.execution_service.domain.execution.aggregates.graph_execution.value_objects.graph_execution_id import (
+    GraphExecutionId,
+)
+from shell.execution_service.domain.execution.aggregates.graph_execution.value_objects.graph_execution_status import (
+    GraphExecutionStatus,
+)
+from shell.platform.domain.base.aggregate_root import AggregateRoot
+from shell.platform.domain.exceptions.domain_error import DomainError
+from shell.platform.domain.value_objects.created_at import CreatedAt
+from shell.platform.domain.value_objects.deleted_at import NONE_DELETED_AT, DeletedAt
+from shell.platform.domain.value_objects.occurred_at import OccurredAt
+
+if TYPE_CHECKING:
+    from shell.execution_service.domain.execution.aggregates.graph_execution.value_objects.graph_definition_id_ref import (
+        GraphDefinitionIdRef,
+    )
+    from shell.execution_service.domain.execution.aggregates.graph_execution.value_objects.max_subgraph_depth import (
+        MaxSubgraphDepth,
+    )
+    from shell.execution_service.domain.execution.aggregates.task_execution.value_objects.task_execution_id import (
+        TaskExecutionId,
+    )
+
+
+from shell.execution_service.domain.execution.aggregates.graph_execution.events.graph_execution_changed_event import (
+    GraphExecutionChangedEvent,
+)
+from shell.execution_service.domain.execution.aggregates.graph_execution.events.graph_execution_created_event import (
+    GraphExecutionCreatedEvent,
+)
+from shell.execution_service.domain.execution.aggregates.graph_execution.events.graph_execution_deleted_event import (
+    GraphExecutionDeletedEvent,
+)
+from shell.platform.domain.value_objects.changed_at import NONE_CHANGED_AT, ChangedAt
+
+
+class GraphExecution(AggregateRoot[GraphExecutionId]):
+    __slots__ = (
+        "_created_at",
+        "_changed_at",
+        "_deleted_at",
+        "_task_execution_id",
+        "_parent_graph_execution_id",
+        "_depth",
+        "_max_subgraph_depth",
+        "_execution_status",
+        "_graph_definition_id",
+    )
+
+    def __init__(
+        self,
+        *,
+        id: GraphExecutionId,
+        created_at: CreatedAt,
+        changed_at: ChangedAt = NONE_CHANGED_AT,
+        deleted_at: DeletedAt = NONE_DELETED_AT,
+        task_execution_id: TaskExecutionId,
+        depth: GraphDepth,
+        max_subgraph_depth: MaxSubgraphDepth,
+        parent_graph_execution_id: GraphExecutionId | None = None,
+        graph_definition_id: GraphDefinitionIdRef | None = None,
+        execution_status: GraphExecutionStatus = GraphExecutionStatus.PENDING,
+    ) -> None:
+        super().__init__(id)
+        self._task_execution_id = task_execution_id
+        self._parent_graph_execution_id = parent_graph_execution_id
+        self._depth = depth
+        self._max_subgraph_depth = max_subgraph_depth
+        self._execution_status = execution_status
+        self._graph_definition_id = graph_definition_id
+        self._created_at = created_at
+        self._changed_at = changed_at
+        self._deleted_at = deleted_at
+
+    @classmethod
+    def restore(
+        cls,
+        *,
+        id: GraphExecutionId,
+        created_at: CreatedAt,
+        changed_at: ChangedAt = NONE_CHANGED_AT,
+        deleted_at: DeletedAt = NONE_DELETED_AT,
+        task_execution_id: TaskExecutionId,
+        depth: GraphDepth,
+        max_subgraph_depth: MaxSubgraphDepth,
+        parent_graph_execution_id: GraphExecutionId | None = None,
+        graph_definition_id: GraphDefinitionIdRef | None = None,
+        execution_status: GraphExecutionStatus = GraphExecutionStatus.PENDING,
+    ) -> Self:
+        instance = cls(
+            id=id,
+            task_execution_id=task_execution_id,
+            parent_graph_execution_id=parent_graph_execution_id,
+            depth=depth,
+            max_subgraph_depth=max_subgraph_depth,
+            graph_definition_id=graph_definition_id,
+            created_at=created_at,
+            changed_at=changed_at,
+            deleted_at=deleted_at,
+            execution_status=execution_status,
+        )
+        return instance
+
+    @classmethod
+    def _new(
+        cls,
+        *,
+        id_: GraphExecutionId,
+        now: OccurredAt,
+        task_execution_id: TaskExecutionId,
+        depth: GraphDepth,
+        max_subgraph_depth: MaxSubgraphDepth,
+        parent_graph_execution_id: GraphExecutionId | None = None,
+        graph_definition_id: GraphDefinitionIdRef | None = None,
+    ) -> GraphExecution:
+        instance = cls(
+            id=id_,
+            task_execution_id=task_execution_id,
+            depth=depth,
+            max_subgraph_depth=max_subgraph_depth,
+            parent_graph_execution_id=parent_graph_execution_id,
+            graph_definition_id=graph_definition_id,
+            created_at=CreatedAt.from_datetime(now.value),
+        )
+        instance.append_event(
+            GraphExecutionCreatedEvent.now(
+                graph_execution_id=id_,
+                now=now,
+            )
+        )
+        return instance
+
+    def plan(self, now: OccurredAt) -> None:
+        self._assert_not_deleted()
+        if self._execution_status not in (
+            GraphExecutionStatus.PENDING,
+            GraphExecutionStatus.PLANNING,
+        ):
+            raise DomainError(f"Cannot plan graph in status {self._execution_status!r}")
+        self._execution_status = GraphExecutionStatus.PLANNING
+        self._change(now=now)
+
+    def execute(self, now: OccurredAt) -> None:
+        self._assert_not_deleted()
+        if self._execution_status != GraphExecutionStatus.PLANNING:
+            raise DomainError(f"Cannot execute graph in status {self._execution_status!r}")
+        self._execution_status = GraphExecutionStatus.EXECUTING
+        self._change(now=now)
+
+    def verify(self, now: OccurredAt) -> None:
+        self._assert_not_deleted()
+        if self._execution_status != GraphExecutionStatus.EXECUTING:
+            raise DomainError(f"Cannot verify graph in status {self._execution_status!r}")
+        self._execution_status = GraphExecutionStatus.VERIFYING
+        self._change(now=now)
+
+    def complete(self, now: OccurredAt) -> None:
+        self._assert_not_deleted()
+        if self._execution_status != GraphExecutionStatus.VERIFYING:
+            raise DomainError(f"Cannot complete graph in status {self._execution_status!r}")
+        self._execution_status = GraphExecutionStatus.COMPLETED
+        self._change(now=now)
+
+    def fail(self, now: OccurredAt) -> None:
+        self._assert_not_deleted()
+        if self._execution_status in (
+            GraphExecutionStatus.COMPLETED,
+            GraphExecutionStatus.FAILED,
+            GraphExecutionStatus.PENDING,
+        ):
+            raise DomainError(f"Cannot fail graph in status {self._execution_status!r}")
+        self._execution_status = GraphExecutionStatus.FAILED
+        self._change(now=now)
+
+    def suspend(self, now: OccurredAt) -> None:
+        self._assert_not_deleted()
+        if self._execution_status not in (
+            GraphExecutionStatus.PENDING,
+            GraphExecutionStatus.EXECUTING,
+        ):
+            raise DomainError(f"Cannot suspend graph in status {self._execution_status!r}")
+        self._execution_status = GraphExecutionStatus.SUSPENDED
+        self._change(now=now)
+
+    def resume(self, now: OccurredAt) -> None:
+        self._assert_not_deleted()
+        if self._execution_status != GraphExecutionStatus.SUSPENDED:
+            raise DomainError(f"Cannot resume graph in status {self._execution_status!r}")
+        self._execution_status = GraphExecutionStatus.PLANNING
+        self._change(now=now)
+
+    def _assert_not_deleted(self) -> None:
+        if self._deleted_at.value is not None:
+            raise DomainError("Cannot change status of a deleted graph execution")
+
+    def delete(self, now: DeletedAt) -> None:
+        if self._deleted_at.value is not None:
+            raise DomainError("Graph execution already deleted")
+        self._delete(now)
+
+    @classmethod
+    def create_main_round(
+        cls,
+        id_: GraphExecutionId,
+        task_execution_id: TaskExecutionId,
+        depth: GraphDepth,
+        max_subgraph_depth: MaxSubgraphDepth,
+        now: CreatedAt,
+    ) -> GraphExecution:
+        return cls._new(
+            id_=id_,
+            task_execution_id=task_execution_id,
+            depth=depth,
+            max_subgraph_depth=max_subgraph_depth,
+            now=OccurredAt.from_datetime(now.value),
+        )
+
+    @classmethod
+    def create_sub_graph(
+        cls,
+        id_: GraphExecutionId,
+        task_execution_id: TaskExecutionId,
+        parent_id: GraphExecutionId,
+        parent_depth: GraphDepth,
+        max_subgraph_depth: MaxSubgraphDepth,
+        now: CreatedAt,
+    ) -> GraphExecution:
+        depth_val = GraphDepth(parent_depth.value + 1)
+        if depth_val.value > max_subgraph_depth.value:
+            raise DomainError(
+                f"Cannot create sub-graph at depth {depth_val.value}, max is {max_subgraph_depth.value}"
+            )
+        return cls._new(
+            id_=id_,
+            task_execution_id=task_execution_id,
+            parent_graph_execution_id=parent_id,
+            depth=depth_val,
+            max_subgraph_depth=max_subgraph_depth,
+            now=OccurredAt.from_datetime(now.value),
+        )
+
+    def _delete(self, now: DeletedAt) -> None:
+        self._deleted_at = now
+        self.append_event(
+            GraphExecutionDeletedEvent.now(
+                graph_execution_id=self._id,
+                now=OccurredAt.from_datetime(now.value),
+            )
+        )
+
+    def _change(self, now: OccurredAt) -> None:
+        self._changed_at = ChangedAt.from_datetime(now.value)
+        self.append_event(
+            GraphExecutionChangedEvent.now(
+                graph_execution_id=self._id,
+                now=OccurredAt.from_datetime(now.value),
+            )
+        )
+
+    @property
+    def task_execution_id(self) -> TaskExecutionId:
+        return self._task_execution_id
+
+    @property
+    def parent_graph_execution_id(self) -> GraphExecutionId | None:
+        return self._parent_graph_execution_id
+
+    @property
+    def depth(self) -> GraphDepth:
+        return self._depth
+
+    @property
+    def max_subgraph_depth(self) -> MaxSubgraphDepth:
+        return self._max_subgraph_depth
+
+    @property
+    def execution_status(self) -> GraphExecutionStatus:
+        return self._execution_status
+
+    @property
+    def status(self) -> GraphExecutionStatus:
+        return self._execution_status
+
+    @property
+    def graph_definition_id(self) -> GraphDefinitionIdRef | None:
+        return self._graph_definition_id
+
+    @property
+    def created_at(self) -> CreatedAt:
+        return self._created_at
+
+    @property
+    def changed_at(self) -> ChangedAt:
+        return self._changed_at
+
+    @property
+    def deleted_at(self) -> DeletedAt:
+        return self._deleted_at

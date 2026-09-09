@@ -1,0 +1,535 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from dependency_injector import containers, providers
+from saga_orchestration.bootstrap.install import install_saga
+
+from shell.platform.application.bus.command_bus import CommandBus
+from shell.platform.application.bus.command_bus_publisher import CommandBusPublisher
+from shell.platform.application.bus.event_bus import EventBus
+from shell.platform.application.bus.query_bus import QueryBus
+from shell.platform.infrastructure.identity.uuid_id_generator import UuidIdGenerator
+from shell.platform.infrastructure.mapping.integration_event_mapper import (
+    IntegrationEventMapper,
+)
+from shell.platform.infrastructure.messaging.command import CommandInboxConsumer, CommandOutboxRelay
+from shell.platform.infrastructure.messaging.command.command_inbox_processor import (
+    CommandInboxProcessor,
+)
+from shell.platform.infrastructure.messaging.command_transport.rabbit import (
+    RabbitCommandDeliveryTransport,
+)
+from shell.platform.infrastructure.messaging.event import EventInboxConsumer, EventOutboxRelay
+from shell.platform.infrastructure.messaging.event.event_inbox_processor import (
+    EventInboxProcessor,
+)
+from shell.platform.infrastructure.messaging.event_transport.rabbit import (
+    RabbitEventDeliveryTransport,
+)
+from shell.platform.infrastructure.messaging.inbox.envelope_validator import (
+    envelope_policy_from_catalog,
+)
+from shell.platform.infrastructure.messaging.inbox.inbox_metrics_service import (
+    InboxMetricsService,
+)
+from shell.platform.infrastructure.messaging.outbox.outbox_metrics_service import (
+    OutboxMetricsService,
+)
+from shell.platform.infrastructure.persistence.sql import build_session_factory
+from shell.platform.infrastructure.serialization.registries.event_registry import (
+    build_domain_event_mapper_registry,
+)
+from shell.platform.infrastructure.serialization.upcaster import PayloadUpcaster
+from shell.platform.infrastructure.time.system_clock import SystemClock
+from shell.platform.observability.infrastructure.health.composite_readiness_probe import (
+    CompositeReadinessProbe,
+)
+from shell.platform.observability.infrastructure.health.rabbit_readiness_probe import (
+    RabbitReadinessProbe,
+)
+from shell.platform.observability.infrastructure.health.saga_timeout_readiness_probe import (
+    SagaTimeoutReadinessProbe,
+)
+from shell.platform.observability.infrastructure.health.sql_readiness_probe import SqlReadinessProbe
+from shell.platform.observability.infrastructure.metrics.prometheus_metrics_backend import (
+    PrometheusMetricsBackend,
+)
+from shell.platform.observability.infrastructure.metrics.registry import MetricsRegistry
+from shell.scheduling_service.application.scheduling.scheduler_definition.command_handlers.change_scheduler_definition_handler import (
+    ChangeSchedulerDefinitionHandler,
+)
+from shell.scheduling_service.application.scheduling.scheduler_definition.command_handlers.create_scheduler_definition_handler import (
+    CreateSchedulerDefinitionHandler,
+)
+from shell.scheduling_service.application.scheduling.scheduler_definition.command_handlers.delete_scheduler_definition_handler import (
+    DeleteSchedulerDefinitionHandler,
+)
+from shell.scheduling_service.application.scheduling.scheduler_definition.commands.change_scheduler_definition_command import (
+    ChangeSchedulerDefinitionCommand,
+)
+from shell.scheduling_service.application.scheduling.scheduler_definition.commands.create_scheduler_definition_command import (
+    CreateSchedulerDefinitionCommand,
+)
+from shell.scheduling_service.application.scheduling.scheduler_definition.commands.delete_scheduler_definition_command import (
+    DeleteSchedulerDefinitionCommand,
+)
+from shell.scheduling_service.application.scheduling.scheduler_definition.queries.get_scheduler_definition_by_id_query import (
+    GetSchedulerDefinitionByIdQuery,
+)
+from shell.scheduling_service.application.scheduling.scheduler_definition.query_handlers.get_scheduler_definition_by_id_handler import (
+    GetSchedulerDefinitionByIdHandler,
+)
+from shell.scheduling_service.application.scheduling.scheduler_execution.command_handlers.change_scheduler_execution_handler import (
+    ChangeSchedulerExecutionHandler,
+)
+from shell.scheduling_service.application.scheduling.scheduler_execution.command_handlers.create_scheduler_execution_handler import (
+    CreateSchedulerExecutionHandler,
+)
+from shell.scheduling_service.application.scheduling.scheduler_execution.command_handlers.delete_scheduler_execution_handler import (
+    DeleteSchedulerExecutionHandler,
+)
+from shell.scheduling_service.application.scheduling.scheduler_execution.commands.change_scheduler_execution_command import (
+    ChangeSchedulerExecutionCommand,
+)
+from shell.scheduling_service.application.scheduling.scheduler_execution.commands.create_scheduler_execution_command import (
+    CreateSchedulerExecutionCommand,
+)
+from shell.scheduling_service.application.scheduling.scheduler_execution.commands.delete_scheduler_execution_command import (
+    DeleteSchedulerExecutionCommand,
+)
+from shell.scheduling_service.application.scheduling.scheduler_execution.queries.get_scheduler_execution_by_id_query import (
+    GetSchedulerExecutionByIdQuery,
+)
+from shell.scheduling_service.application.scheduling.scheduler_execution.queries.list_scheduler_executions_query import (
+    ListSchedulerExecutionsQuery,
+)
+from shell.scheduling_service.application.scheduling.scheduler_execution.query_handlers.get_scheduler_execution_by_id_handler import (
+    GetSchedulerExecutionByIdHandler,
+)
+from shell.scheduling_service.application.scheduling.scheduler_execution.query_handlers.list_scheduler_executions_handler import (
+    ListSchedulerExecutionsHandler,
+)
+from shell.scheduling_service.application.scheduling.scheduler_job.command_handlers.change_scheduler_job_handler import (
+    ChangeSchedulerJobHandler,
+)
+from shell.scheduling_service.application.scheduling.scheduler_job.command_handlers.create_scheduler_job_handler import (
+    CreateSchedulerJobHandler,
+)
+from shell.scheduling_service.application.scheduling.scheduler_job.command_handlers.delete_scheduler_job_handler import (
+    DeleteSchedulerJobHandler,
+)
+from shell.scheduling_service.application.scheduling.scheduler_job.commands.change_scheduler_job_command import (
+    ChangeSchedulerJobCommand,
+)
+from shell.scheduling_service.application.scheduling.scheduler_job.commands.create_scheduler_job_command import (
+    CreateSchedulerJobCommand,
+)
+from shell.scheduling_service.application.scheduling.scheduler_job.commands.delete_scheduler_job_command import (
+    DeleteSchedulerJobCommand,
+)
+from shell.scheduling_service.application.scheduling.scheduler_job.queries.get_scheduler_job_by_id_query import (
+    GetSchedulerJobByIdQuery,
+)
+from shell.scheduling_service.application.scheduling.scheduler_job.queries.list_scheduler_jobs_query import (
+    ListSchedulerJobsQuery,
+)
+from shell.scheduling_service.application.scheduling.scheduler_job.query_handlers.get_scheduler_job_by_id_handler import (
+    GetSchedulerJobByIdHandler,
+)
+from shell.scheduling_service.application.scheduling.scheduler_job.query_handlers.list_scheduler_jobs_handler import (
+    ListSchedulerJobsHandler,
+)
+from shell.scheduling_service.application.scheduling.scheduler_provision.command_handlers.provision_schedule_handler import (
+    ProvisionScheduleHandler,
+)
+from shell.scheduling_service.application.scheduling.scheduler_provision.command_handlers.release_schedule_handler import (
+    ReleaseScheduleHandler,
+)
+from shell.scheduling_service.application.scheduling.scheduler_provision.commands.provision_schedule_command import (
+    ProvisionScheduleCommand,
+)
+from shell.scheduling_service.application.scheduling.scheduler_provision.commands.release_schedule_command import (
+    ReleaseScheduleCommand,
+)
+from shell.scheduling_service.application.scheduling.scheduler_provision.commands.start_scheduler_provision_command import (
+    StartSchedulerProvisionCommand,
+)
+from shell.scheduling_service.application.scheduling.scheduler_provision.integration_events.schedule_provision_failed_integration_event import (
+    ScheduleProvisionFailedIntegrationEvent,
+)
+from shell.scheduling_service.application.scheduling.scheduler_provision.integration_events.schedule_provisioned_integration_event import (
+    ScheduleProvisionedIntegrationEvent,
+)
+from shell.scheduling_service.application.scheduling.scheduler_provision.integration_events.schedule_released_integration_event import (
+    ScheduleReleasedIntegrationEvent,
+)
+from shell.scheduling_service.bootstrap.scheduling.command_contracts import (
+    SCHEDULING_COMMAND_CONTRACTS,
+    build_scheduling_command_registry,
+)
+from shell.scheduling_service.bootstrap.scheduling.contract_catalog import (
+    SCHEDULING_CONTRACT_CATALOG,
+)
+from shell.scheduling_service.bootstrap.scheduling.delivery import build_delivery_config
+from shell.scheduling_service.bootstrap.scheduling.event_registry import (
+    build_scheduling_event_registry,
+)
+from shell.scheduling_service.infrastructure.scheduling.persistence.sql.models.base import (
+    PERSISTENCE_DELIVERY_MODELS,
+    SAGA_MODELS,
+)
+from shell.scheduling_service.infrastructure.scheduling.saga.saga_result_writer import (
+    SqlScheduleResultWriter,
+)
+from shell.scheduling_service.infrastructure.scheduling.saga.saga_wiring import (
+    build_scheduling_saga_unit_of_work_factory,
+)
+from shell.scheduling_service.infrastructure.scheduling.scheduler_definition.persistence.sql.services.scheduler_definition_query_service import (
+    SchedulerDefinitionQueryService,
+)
+from shell.scheduling_service.infrastructure.scheduling.scheduler_definition.persistence.sql.unit_of_work import (
+    SqlAlchemySchedulerDefinitionUnitOfWork,
+)
+from shell.scheduling_service.infrastructure.scheduling.scheduler_execution.persistence.sql.services.scheduler_execution_query_service import (
+    SchedulerExecutionQueryService,
+)
+from shell.scheduling_service.infrastructure.scheduling.scheduler_execution.persistence.sql.unit_of_work import (
+    SqlAlchemySchedulerExecutionUnitOfWork,
+)
+from shell.scheduling_service.infrastructure.scheduling.scheduler_job.persistence.sql.services.scheduler_job_query_service import (
+    SchedulerJobQueryService,
+)
+from shell.scheduling_service.infrastructure.scheduling.scheduler_job.persistence.sql.unit_of_work import (
+    SqlAlchemySchedulerJobUnitOfWork,
+)
+from shell.scheduling_service.process.scheduling.scheduler_provision.handlers.provision_result_bridge_handler import (
+    ProvisionResultBridgeHandler,
+)
+from shell.scheduling_service.process.scheduling.scheduler_provision.handlers.release_result_bridge_handler import (
+    ReleaseResultBridgeHandler,
+)
+from shell.scheduling_service.process.scheduling.scheduler_provision.handlers.start_saga_bridge_handler import (
+    StartSchedulerProvisionBridgeHandler,
+)
+from shell.scheduling_service.process.scheduling.scheduler_provision.saga_definition import (
+    SAGA_TYPE as SCHEDULER_SAGA_TYPE,
+)
+from shell.scheduling_service.process.scheduling.scheduler_provision.saga_definition import (
+    SCHEDULER_PROVISION_STEPS,
+)
+from shell.scheduling_service.process.scheduling.scheduler_provision.saga_dispatch import (
+    SchedulerProvisionDispatchResolver,
+)
+
+if TYPE_CHECKING:
+    from saga_orchestration.bootstrap.install import SagaWiring
+    from saga_orchestration.infrastructure.saga_timeout_worker import SagaTimeoutWorker
+
+
+def _saga_timeout_worker(*, wiring: SagaWiring) -> SagaTimeoutWorker:
+    """Worker timeoutów z wiringu install_saga (extra_processor w main --worker)."""
+    return wiring.timeout_worker
+
+
+class SchedulingCoreContainer(containers.DeclarativeContainer):
+    config = providers.Configuration()
+    session_factory = providers.Singleton(build_session_factory, url=config.db_url)
+    persistence_delivery_models = providers.Object(PERSISTENCE_DELIVERY_MODELS)
+    saga_models = providers.Object(SAGA_MODELS)
+    saga_result_writer = providers.Singleton(
+        SqlScheduleResultWriter,
+        event_models=persistence_delivery_models.provided.events,
+    )
+    provision_schedule_handler_factory = providers.Factory(
+        ProvisionScheduleHandler,
+        result_writer=saga_result_writer,
+    )
+    release_schedule_handler_factory = providers.Factory(
+        ReleaseScheduleHandler,
+        result_writer=saga_result_writer,
+    )
+    metrics_exporter = providers.Singleton(MetricsRegistry)
+    metrics_backend = providers.Singleton(PrometheusMetricsBackend, registry=metrics_exporter)
+    inbox_metrics_service = providers.Singleton(
+        InboxMetricsService,
+        session_factory=session_factory,
+        inbox_model=persistence_delivery_models.provided.events.inbox,
+        backend=metrics_backend,
+    )
+    outbox_metrics_service = providers.Singleton(
+        OutboxMetricsService,
+        session_factory=session_factory,
+        outbox_model=persistence_delivery_models.provided.events.outbox,
+        backend=metrics_backend,
+    )
+    readiness_probe = providers.Singleton(
+        CompositeReadinessProbe,
+        probes=providers.List(
+            providers.Singleton(
+                SqlReadinessProbe,
+                session_factory=session_factory,
+                inbox_model=persistence_delivery_models.provided.events.inbox,
+                max_backlog=1000,
+                worker_heartbeat_model=persistence_delivery_models.provided.worker_heartbeat,
+            ),
+            providers.Singleton(
+                RabbitReadinessProbe,
+                url_provider=providers.Object(config.broker_url),
+            ),
+            providers.Singleton(
+                SagaTimeoutReadinessProbe,
+                session_factory=session_factory,
+                timeout_model=saga_models.provided.timeout,
+                max_backlog=100,
+            ),
+        ),
+    )
+    integration_mapper = providers.Singleton(
+        IntegrationEventMapper,
+        integration_events=build_domain_event_mapper_registry(
+            build_scheduling_event_registry()
+        ),
+    )
+    scheduler_definition_uow_factory = providers.Factory(
+        SqlAlchemySchedulerDefinitionUnitOfWork,
+        session_factory=session_factory,
+        mapper=integration_mapper,
+        source_service="scheduling_service",
+        models=persistence_delivery_models,
+    )
+    scheduler_execution_uow_factory = providers.Factory(
+        SqlAlchemySchedulerExecutionUnitOfWork,
+        session_factory=session_factory,
+        mapper=integration_mapper,
+        source_service="scheduling_service",
+        models=persistence_delivery_models,
+    )
+    scheduler_job_uow_factory = providers.Factory(
+        SqlAlchemySchedulerJobUnitOfWork,
+        session_factory=session_factory,
+        mapper=integration_mapper,
+        source_service="scheduling_service",
+        models=persistence_delivery_models,
+    )
+    clock_factory = providers.Factory(SystemClock)
+    id_generator_factory = providers.Factory(UuidIdGenerator)
+    command_bus = providers.Singleton(CommandBus)
+    command_bus_publisher = providers.Singleton(CommandBusPublisher, command_bus=command_bus)
+    query_bus = providers.Singleton(QueryBus)
+    event_bus = providers.Singleton(EventBus)
+    event_registry = providers.Singleton(build_scheduling_event_registry)
+    event_inbox_processor_factory = providers.Factory(
+        EventInboxProcessor,
+        session_factory=session_factory,
+        event_bus=event_bus,
+        models=persistence_delivery_models.provided.events,
+        registry=event_registry,
+        worker_id=config.worker_id,
+        heartbeat_interval_seconds=config.worker_heartbeat_interval_seconds,
+        max_batch_time_seconds=config.worker_max_batch_time_seconds,
+        envelope_policy=envelope_policy_from_catalog(SCHEDULING_CONTRACT_CATALOG),
+        upcaster=providers.Singleton(PayloadUpcaster),
+    )
+    event_delivery_transport = providers.Factory(
+        RabbitEventDeliveryTransport, url=config.broker_url
+    )
+    outbox_to_transport_relay_factory = providers.Factory(
+        EventOutboxRelay,
+        session_factory=session_factory,
+        models=persistence_delivery_models.provided.events,
+        transport=event_delivery_transport,
+    )
+    command_delivery_transport = providers.Factory(
+        RabbitCommandDeliveryTransport, url=config.broker_url
+    )
+    command_outbox_to_transport_relay_factory = providers.Factory(
+        CommandOutboxRelay,
+        session_factory=session_factory,
+        models=persistence_delivery_models.provided.commands,
+        transport=command_delivery_transport,
+    )
+    command_registry = providers.Object(build_scheduling_command_registry())
+    command_inbox_processor_factory = providers.Factory(
+        CommandInboxProcessor,
+        session_factory=session_factory,
+        dispatcher=command_bus_publisher,
+        models=persistence_delivery_models.provided.commands,
+        registry=command_registry,
+        worker_id=config.command_worker_id,
+        heartbeat_interval_seconds=config.worker_heartbeat_interval_seconds,
+        max_batch_time_seconds=config.worker_max_batch_time_seconds,
+        upcaster=providers.Singleton(PayloadUpcaster),
+    )
+    rabbit_inbox_consumer_factory = providers.Factory(
+        EventInboxConsumer,
+        url=config.broker_url,
+        session_factory=session_factory,
+        models=persistence_delivery_models.provided.events,
+        queue_name="shell-scheduling-event-inbox",
+        routing_keys=["event.#"],
+    )
+    rabbit_command_inbox_consumer_factory = providers.Factory(
+        CommandInboxConsumer,
+        url=config.broker_url,
+        session_factory=session_factory,
+        models=persistence_delivery_models.provided.commands,
+        service_name="scheduling",
+    )
+    scheduler_definition_query_service = providers.Singleton(
+        SchedulerDefinitionQueryService, session_factory=session_factory
+    )
+    scheduler_execution_query_service = providers.Singleton(
+        SchedulerExecutionQueryService, session_factory=session_factory
+    )
+    scheduler_job_query_service = providers.Singleton(
+        SchedulerJobQueryService, session_factory=session_factory
+    )
+    create_scheduler_definition_handler_factory = providers.Factory(
+        CreateSchedulerDefinitionHandler,
+        unit_of_work=scheduler_definition_uow_factory,
+        clock=clock_factory,
+        id_generator=id_generator_factory,
+    )
+    change_scheduler_definition_handler_factory = providers.Factory(
+        ChangeSchedulerDefinitionHandler,
+        unit_of_work=scheduler_definition_uow_factory,
+        clock=clock_factory,
+    )
+    delete_scheduler_definition_handler_factory = providers.Factory(
+        DeleteSchedulerDefinitionHandler,
+        unit_of_work=scheduler_definition_uow_factory,
+        clock=clock_factory,
+    )
+    create_scheduler_execution_handler_factory = providers.Factory(
+        CreateSchedulerExecutionHandler,
+        unit_of_work=scheduler_execution_uow_factory,
+        clock=clock_factory,
+        id_generator=id_generator_factory,
+    )
+    change_scheduler_execution_handler_factory = providers.Factory(
+        ChangeSchedulerExecutionHandler,
+        unit_of_work=scheduler_execution_uow_factory,
+        clock=clock_factory,
+    )
+    delete_scheduler_execution_handler_factory = providers.Factory(
+        DeleteSchedulerExecutionHandler,
+        unit_of_work=scheduler_execution_uow_factory,
+        clock=clock_factory,
+    )
+    create_scheduler_job_handler_factory = providers.Factory(
+        CreateSchedulerJobHandler,
+        unit_of_work=scheduler_job_uow_factory,
+        clock=clock_factory,
+        id_generator=id_generator_factory,
+    )
+    change_scheduler_job_handler_factory = providers.Factory(
+        ChangeSchedulerJobHandler, unit_of_work=scheduler_job_uow_factory, clock=clock_factory
+    )
+    delete_scheduler_job_handler_factory = providers.Factory(
+        DeleteSchedulerJobHandler, unit_of_work=scheduler_job_uow_factory, clock=clock_factory
+    )
+    get_scheduler_definition_handler_factory = providers.Factory(
+        GetSchedulerDefinitionByIdHandler, queries=scheduler_definition_query_service
+    )
+    get_scheduler_execution_handler_factory = providers.Factory(
+        GetSchedulerExecutionByIdHandler, queries=scheduler_execution_query_service
+    )
+    list_scheduler_executions_handler_factory = providers.Factory(
+        ListSchedulerExecutionsHandler, queries=scheduler_execution_query_service
+    )
+    get_scheduler_job_handler_factory = providers.Factory(
+        GetSchedulerJobByIdHandler, queries=scheduler_job_query_service
+    )
+    list_scheduler_jobs_handler_factory = providers.Factory(
+        ListSchedulerJobsHandler, queries=scheduler_job_query_service
+    )
+    saga_uow_factory = providers.Singleton(
+        build_scheduling_saga_unit_of_work_factory,
+        session_factory=session_factory,
+        models=saga_models,
+        commands_models=persistence_delivery_models.provided.commands,
+        contracts=providers.Object(SCHEDULING_COMMAND_CONTRACTS),
+        registries=providers.Object({SCHEDULER_SAGA_TYPE: SCHEDULER_PROVISION_STEPS}),
+    )
+    saga_dispatch_resolver = providers.Singleton(SchedulerProvisionDispatchResolver)
+    saga_wiring = providers.Singleton(
+        install_saga,
+        uow_factory=saga_uow_factory,
+        dispatch_resolver=saga_dispatch_resolver,
+        clock=clock_factory,
+        ids=id_generator_factory,
+        source_service="scheduling",
+        owner="scheduling-saga-timeout",
+    )
+    start_saga_bridge_handler_factory = providers.Factory(
+        StartSchedulerProvisionBridgeHandler,
+        start_handler=saga_wiring.provided.start_handler,
+    )
+    provision_result_bridge_handler_factory = providers.Factory(
+        ProvisionResultBridgeHandler,
+        advance_handler=saga_wiring.provided.advance_handler,
+    )
+    release_result_bridge_handler_factory = providers.Factory(
+        ReleaseResultBridgeHandler,
+        advance_handler=saga_wiring.provided.advance_handler,
+    )
+    saga_timeout_worker_factory = providers.Factory(
+        _saga_timeout_worker,
+        wiring=saga_wiring,
+    )
+    delivery_config = providers.Singleton(
+        build_delivery_config,
+        models=persistence_delivery_models,
+        event_registry=event_registry,
+        command_registry=command_registry,
+        event_bus=event_bus,
+        command_bus=command_bus,
+        event_transport=event_delivery_transport,
+        command_transport=command_delivery_transport,
+        session_factory=session_factory,
+    )
+
+
+def configure_scheduling_container(container: SchedulingCoreContainer) -> None:
+    command_bus = container.command_bus()
+    event_bus = container.event_bus()
+    query_bus = container.query_bus()
+    for command, factory in (
+        (CreateSchedulerDefinitionCommand, container.create_scheduler_definition_handler_factory),
+        (ChangeSchedulerDefinitionCommand, container.change_scheduler_definition_handler_factory),
+        (DeleteSchedulerDefinitionCommand, container.delete_scheduler_definition_handler_factory),
+        (CreateSchedulerExecutionCommand, container.create_scheduler_execution_handler_factory),
+        (ChangeSchedulerExecutionCommand, container.change_scheduler_execution_handler_factory),
+        (DeleteSchedulerExecutionCommand, container.delete_scheduler_execution_handler_factory),
+        (CreateSchedulerJobCommand, container.create_scheduler_job_handler_factory),
+        (ChangeSchedulerJobCommand, container.change_scheduler_job_handler_factory),
+        (DeleteSchedulerJobCommand, container.delete_scheduler_job_handler_factory),
+        (StartSchedulerProvisionCommand, container.start_saga_bridge_handler_factory),
+        (ProvisionScheduleCommand, container.provision_schedule_handler_factory),
+        (ReleaseScheduleCommand, container.release_schedule_handler_factory),
+    ):
+        command_bus.register(command, factory)
+    event_bus.subscribe(
+        ScheduleProvisionedIntegrationEvent,
+        container.provision_result_bridge_handler_factory,
+    )
+    event_bus.subscribe(
+        ScheduleProvisionFailedIntegrationEvent,
+        container.provision_result_bridge_handler_factory,
+    )
+    event_bus.subscribe(
+        ScheduleReleasedIntegrationEvent,
+        container.release_result_bridge_handler_factory,
+    )
+    query_bus.register(
+        GetSchedulerDefinitionByIdQuery, container.get_scheduler_definition_handler_factory
+    )
+    query_bus.register(
+        GetSchedulerExecutionByIdQuery, container.get_scheduler_execution_handler_factory
+    )
+    query_bus.register(
+        ListSchedulerExecutionsQuery, container.list_scheduler_executions_handler_factory
+    )
+    query_bus.register(GetSchedulerJobByIdQuery, container.get_scheduler_job_handler_factory)
+    query_bus.register(ListSchedulerJobsQuery, container.list_scheduler_jobs_handler_factory)

@@ -1,0 +1,26 @@
+from __future__ import annotations
+
+from datetime import datetime  # noqa: TC003 - SQLAlchemy resolves Mapped[...] at class definition
+
+from sqlalchemy.orm import Mapped, declared_attr, mapped_column
+
+from shell.definition_service.infrastructure.definition.persistence.sql.models.base import (
+    DefinitionSqlAlchemyModelBase,
+)
+from shell.platform.infrastructure.persistence.sql.models.mixins import VersionedMixin
+
+
+class NodeDefinitionModel(DefinitionSqlAlchemyModelBase, VersionedMixin):
+    __tablename__ = "node_definition"
+
+    id: Mapped[str] = mapped_column(primary_key=True)
+    node_position: Mapped[int] = mapped_column("position", nullable=False)
+    node_type: Mapped[str] = mapped_column(nullable=False)
+    max_step: Mapped[int | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(nullable=False)
+    changed_at: Mapped[datetime | None] = mapped_column(nullable=True, default=None)
+    deleted_at: Mapped[datetime | None] = mapped_column(nullable=True, default=None)
+
+    @declared_attr  # type: ignore[arg-type]
+    def __mapper_args__(cls) -> dict[str, object]:
+        return {"version_id_col": cls.version}
